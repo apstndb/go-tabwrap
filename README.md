@@ -9,7 +9,7 @@ Provides `StringWidth`, `ExpandTab`, `Wrap`, `Truncate`, `FillLeft`, and `FillRi
 - **Grapheme-cluster-aware** — emoji sequences and combining characters are measured correctly (via [displaywidth]).
 - **Tab-stop expansion** — every operation handles `\t` as an elastic tab stop, not a single character.
 - **Line wrapping** — `Wrap` breaks text to fit a column width. Tabs are indivisible: if a tab does not fit, it moves to the next line.
-- **ANSI escape sequence aware** — optional `ControlSequences` mode treats SGR and other 7-bit escape sequences as zero-width, allowing correct measurement of styled terminal output.
+- **ANSI escape sequence aware** — optional `ControlSequences` mode treats SGR and other 7-bit escape sequences as zero-width, allowing correct measurement of styled terminal output. `Wrap` carries SGR state across line breaks, so each output line is independently styled.
 - **East Asian Width** — optional treatment of ambiguous characters as double-width.
 
 ## Install
@@ -49,6 +49,12 @@ func main() {
 	ansi := &tabwrap.Condition{TabWidth: 4, ControlSequences: true}
 	styled := "\x1b[31mhello\x1b[0m"
 	fmt.Println(ansi.StringWidth(styled))       // 5 (escape sequences ignored)
+
+	// Wrap carries SGR state across line breaks.
+	wrapped := ansi.Wrap("\x1b[31mhelloworld\x1b[0m", 5)
+	// Result: "\x1b[31mhello\x1b[0m\n\x1b[31mworld\x1b[0m"
+	// Each line is independently styled.
+	fmt.Println(wrapped)
 }
 ```
 
