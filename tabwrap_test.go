@@ -290,7 +290,7 @@ func TestControlSequences(t *testing.T) {
 		}
 	})
 
-	t.Run("Wrap with ControlSequences", func(t *testing.T) {
+	t.Run("Wrap with ControlSequences no wrap", func(t *testing.T) {
 		t.Parallel()
 		c := &Condition{TabWidth: 4, ControlSequences: true}
 		// "hello" is 5 visible chars, should not wrap at width 5
@@ -299,4 +299,117 @@ func TestControlSequences(t *testing.T) {
 			t.Errorf("Wrap(%q, 5) should not wrap, got %q", styled, got)
 		}
 	})
+}
+
+func TestWrapSGRCarryOver(t *testing.T) {
+	t.Parallel()
+	c := &Condition{TabWidth: 4, ControlSequences: true}
+
+	red := "\x1b[31m"
+	bold := "\x1b[1m"
+	dim := "\x1b[2m"
+	reset := "\x1b[0m"
+
+	tests := []struct {
+		name  string
+		s     string
+		width int
+		want  string
+	}{
+		{
+			name:  "single color wrap",
+			s:     red + "helloworld" + reset,
+			width: 5,
+			// At wrap break: emit reset, newline, replay red
+			want: red + "hello" + reset + "\n" + red + "world" + reset,
+		},
+		{
+			name:  "no wrap needed",
+			s:     red + "hello" + reset,
+			width: 10,
+			want:  red + "hello" + reset,
+		},
+		{
+			name:  "multiple SGR sequences",
+			s:     bold + red + "helloworld" + reset,
+			width: 5,
+			want:  bold + red + "hello" + reset + "\n" + bold + red + "world" + reset,
+		},
+		{
+			name:  "reset mid-text clears state",
+			s:     red + "he" + reset + "lloworld",
+			width: 5,
+			// After reset, no SGR state to carry over
+			want: red + "he" + reset + "llo\nworld",
+		},
+		{
+			name:  "natural newline carries state",
+			s:     red + "ab\ncd" + reset,
+			width: 10,
+			want:  red + "ab" + reset + "\n" + red + "cd" + reset,
+		},
+		{
+			name:  "dim NULL wrap",
+			s:     dim + "NULL value here" + reset,
+			width: 10,
+			want:  dim + "NULL value" + reset + "\n" + dim + " here" + reset,
+		},
+		{
+			name:  "without ControlSequences unchanged",
+			s:     red + "helloworld" + reset,
+			width: 5,
+			// When ControlSequences is false, escape bytes are visible chars
+			// and wrapping happens differently - just verify no crash
+			want:  "", // skip exact match, just verify no panic
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if tt.name == "without ControlSequences unchanged" {
+				noCSI := &Condition{TabWidth: 4, ControlSequences: false}
+				got := noCSI.Wrap(tt.s, tt.width)
+				_ = got // just verify no panic
+				return
+			}
+			got := c.Wrap(tt.s, tt.width)
+			if got != tt.want {
+				t.Errorf("Wrap(%q, %d):\n got  %q\n want %q", tt.s, tt.width, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWrapSGRCarryOverLineIndependence(t *testing.T) {
+	t.Parallel()
+	c := &Condition{TabWidth: 4, ControlSequences: true}
+
+	dim := "\x1b[2m"
+	reset := "\x1b[0m"
+
+	// Verify each line is independently styled
+	input := dim + "hello world test" + reset
+	got := c.Wrap(input, 5)
+	lines := strings.Split(got, "\n")
+
+	for i, line := range lines {
+		// Each line should start with dim (if non-empty visible content)
+		if !strings.HasPrefix(line, dim) {
+			t.Errorf("line %d %q: does not start with dim sequence", i, line)
+		}
+		// Each line (except possibly the last if it ends with reset from input)
+		// should contain a reset
+		if !strings.Contains(line, reset) {
+			t.Errorf("line %d %q: does not contain reset sequence", i, line)
+		}
+	}
+
+	// Verify visible width of each line is correct
+	for i, line := range lines {
+		w := c.StringWidth(line)
+		if w > 5 {
+			t.Errorf("line %d visible width = %d, want <= 5", i, w)
+		}
+	}
 }

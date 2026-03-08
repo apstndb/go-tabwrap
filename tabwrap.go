@@ -117,6 +117,11 @@ func (c *Condition) ExpandTab(s string) string {
 //
 // Existing newlines are preserved. When width <= 0 the string is returned
 // with tabs expanded but no wrapping applied.
+//
+// When ControlSequences is true, SGR (Select Graphic Rendition) state is
+// carried across line breaks: a reset is emitted before each newline and the
+// active SGR sequences are replayed after it. This ensures each output line
+// is independently styled.
 func (c *Condition) Wrap(s string, width int) string {
 	if width <= 0 {
 		return c.ExpandTab(s)
@@ -124,22 +129,53 @@ func (c *Condition) Wrap(s string, width int) string {
 
 	opts := c.options()
 	tw := c.tabWidth()
+	trackSGR := c.ControlSequences
 
 	var b strings.Builder
 	b.Grow(len(s))
 	col := 0
+	var sgrState []string
+
+	// emitNewline writes a line break. When SGR tracking is active, it emits
+	// a reset before the newline and replays the current SGR state after it.
+	emitNewline := func() {
+		if trackSGR && len(sgrState) > 0 {
+			b.WriteString("\x1b[0m")
+		}
+		b.WriteByte('\n')
+		if trackSGR {
+			for _, seq := range sgrState {
+				b.WriteString(seq)
+			}
+		}
+	}
 
 	gs := opts.StringGraphemes(s)
 	for gs.Next() {
 		v := gs.Value()
+		w := gs.Width()
+
+		// Track SGR sequences (zero-width escape sequences starting with ESC).
+		if trackSGR && w == 0 && len(v) > 0 && v[0] == '\x1b' {
+			if isSGR(v) {
+				if isSGRReset(v) {
+					sgrState = sgrState[:0]
+				} else {
+					sgrState = append(sgrState, v)
+				}
+			}
+			b.WriteString(v)
+			continue
+		}
+
 		switch v {
 		case "\n":
-			b.WriteByte('\n')
+			emitNewline()
 			col = 0
 		case "\t":
 			spaces := tw - col%tw
 			if col+spaces > width && col > 0 {
-				b.WriteByte('\n')
+				emitNewline()
 				col = 0
 				spaces = tw
 			}
@@ -148,9 +184,8 @@ func (c *Condition) Wrap(s string, width int) string {
 			}
 			col += spaces
 		default:
-			w := gs.Width()
 			if col+w > width && col > 0 {
-				b.WriteByte('\n')
+				emitNewline()
 				col = 0
 			}
 			b.WriteString(v)
@@ -158,6 +193,17 @@ func (c *Condition) Wrap(s string, width int) string {
 		}
 	}
 	return b.String()
+}
+
+// isSGR reports whether s is a CSI SGR (Select Graphic Rendition) sequence.
+// SGR sequences have the form ESC [ <params> m.
+func isSGR(s string) bool {
+	return len(s) >= 3 && s[0] == '\x1b' && s[1] == '[' && s[len(s)-1] == 'm'
+}
+
+// isSGRReset reports whether s is an SGR reset sequence.
+func isSGRReset(s string) bool {
+	return s == "\x1b[0m" || s == "\x1b[m"
 }
 
 // Truncate truncates s to fit within maxWidth display columns, appending tail
