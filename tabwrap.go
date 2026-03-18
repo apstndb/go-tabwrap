@@ -92,6 +92,8 @@ func (c *Condition) ExpandTab(s string) string {
 // The column advances by nSpaces regardless of what fn returns, so the caller
 // is responsible for returning a string whose display width equals nSpaces if
 // alignment matters. Columns reset at each newline.
+//
+// ExpandTabFunc panics if fn is nil.
 func (c *Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string {
 	opts := c.options()
 	tw := c.tabWidth()
