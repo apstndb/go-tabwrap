@@ -138,10 +138,13 @@ func TestExpandTabFunc(t *testing.T) {
 	t.Run("multiple tabs", func(t *testing.T) {
 		t.Parallel()
 		got := c.ExpandTabFunc("a\tb\t", func(nSpaces int) string {
+			if nSpaces < 2 {
+				return strings.Repeat(".", nSpaces)
+			}
 			return "[" + strings.Repeat("-", nSpaces-2) + "]"
 		})
-		// "a" at col 0, tab nSpaces=3: "[- ]" (but we use nSpaces-2 dashes)
-		// col advances to 4, "b" at col 4, tab nSpaces=3: "[-]"
+		// "a" at col 1, tab nSpaces=3: "[-]"
+		// col advances to 4, "b" at col 5, tab nSpaces=3: "[-]"
 		want := "a[-]b[-]"
 		if got != want {
 			t.Errorf("ExpandTabFunc = %q, want %q", got, want)
