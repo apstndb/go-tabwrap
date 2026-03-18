@@ -82,6 +82,19 @@ func (c *Condition) StringWidth(s string) int {
 // ExpandTab replaces every tab with spaces according to tab stops.
 // Columns reset at each newline.
 func (c *Condition) ExpandTab(s string) string {
+	return c.ExpandTabFunc(s, func(nSpaces int) string {
+		return strings.Repeat(" ", nSpaces)
+	})
+}
+
+// ExpandTabFunc replaces every tab by calling fn with the number of spaces
+// the tab would normally expand to (based on the current column and tab width).
+// The column advances by nSpaces regardless of what fn returns, so the caller
+// is responsible for returning a string whose display width equals nSpaces if
+// alignment matters. Columns reset at each newline.
+//
+// ExpandTabFunc panics if fn is nil.
+func (c *Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string {
 	opts := c.options()
 	tw := c.tabWidth()
 
@@ -96,11 +109,9 @@ func (c *Condition) ExpandTab(s string) string {
 			b.WriteByte('\n')
 			col = 0
 		case "\t":
-			spaces := tw - col%tw
-			for range spaces {
-				b.WriteByte(' ')
-			}
-			col += spaces
+			nSpaces := tw - col%tw
+			b.WriteString(fn(nSpaces))
+			col += nSpaces
 		default:
 			b.WriteString(v)
 			col += gs.Width()

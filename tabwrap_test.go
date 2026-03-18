@@ -96,6 +96,83 @@ func TestExpandTab(t *testing.T) {
 	}
 }
 
+func TestExpandTabFunc(t *testing.T) {
+	t.Parallel()
+	c := NewCondition()
+
+	t.Run("arrow marker", func(t *testing.T) {
+		t.Parallel()
+		got := c.ExpandTabFunc("abc\tdef", func(nSpaces int) string {
+			return "→" + strings.Repeat(" ", nSpaces-1)
+		})
+		want := "abc→def"
+		if got != want {
+			t.Errorf("ExpandTabFunc(%q) = %q, want %q", "abc\tdef", got, want)
+		}
+	})
+
+	t.Run("identity with spaces", func(t *testing.T) {
+		t.Parallel()
+		// ExpandTabFunc with spaces should behave identically to ExpandTab
+		input := "a\tbc\t\nde\t"
+		got := c.ExpandTabFunc(input, func(nSpaces int) string {
+			return strings.Repeat(" ", nSpaces)
+		})
+		want := c.ExpandTab(input)
+		if got != want {
+			t.Errorf("ExpandTabFunc with spaces = %q, want %q (same as ExpandTab)", got, want)
+		}
+	})
+
+	t.Run("tab at start", func(t *testing.T) {
+		t.Parallel()
+		got := c.ExpandTabFunc("\thi", func(nSpaces int) string {
+			return "→" + strings.Repeat("·", nSpaces-1)
+		})
+		want := "→···hi"
+		if got != want {
+			t.Errorf("ExpandTabFunc(%q) = %q, want %q", "\thi", got, want)
+		}
+	})
+
+	t.Run("multiple tabs", func(t *testing.T) {
+		t.Parallel()
+		got := c.ExpandTabFunc("a\tb\t", func(nSpaces int) string {
+			if nSpaces < 2 {
+				return strings.Repeat(".", nSpaces)
+			}
+			return "[" + strings.Repeat("-", nSpaces-2) + "]"
+		})
+		// "a" at col 1, tab nSpaces=3: "[-]"
+		// col advances to 4, "b" at col 5, tab nSpaces=3: "[-]"
+		want := "a[-]b[-]"
+		if got != want {
+			t.Errorf("ExpandTabFunc = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("with newline", func(t *testing.T) {
+		t.Parallel()
+		got := c.ExpandTabFunc("ab\t\ncd\t", func(nSpaces int) string {
+			return "→" + strings.Repeat(" ", nSpaces-1)
+		})
+		want := "ab→ \ncd→ "
+		if got != want {
+			t.Errorf("ExpandTabFunc = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("nil func panics", func(t *testing.T) {
+		t.Parallel()
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("ExpandTabFunc(s, nil) did not panic")
+			}
+		}()
+		c.ExpandTabFunc("a\tb", nil)
+	})
+}
+
 func TestWrap(t *testing.T) {
 	t.Parallel()
 	c := NewCondition()
