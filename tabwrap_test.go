@@ -161,6 +161,16 @@ func TestExpandTabFunc(t *testing.T) {
 			t.Errorf("ExpandTabFunc = %q, want %q", got, want)
 		}
 	})
+
+	t.Run("nil func panics", func(t *testing.T) {
+		t.Parallel()
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("ExpandTabFunc(s, nil) did not panic")
+			}
+		}()
+		c.ExpandTabFunc("a\tb", nil)
+	})
 }
 
 func TestWrap(t *testing.T) {
