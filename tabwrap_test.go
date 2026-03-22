@@ -468,31 +468,27 @@ func TestWrapSGRCarryOver(t *testing.T) {
 			width: 10,
 			want:  dim + "NULL value" + reset + "\n" + dim + " here" + reset,
 		},
-		{
-			name:  "without ControlSequences unchanged",
-			s:     red + "helloworld" + reset,
-			width: 5,
-			// When ControlSequences is false, escape bytes are visible chars
-			// and wrapping happens differently - just verify no crash
-			want:  "", // skip exact match, just verify no panic
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if tt.name == "without ControlSequences unchanged" {
-				noCSI := &Condition{TabWidth: 4, ControlSequences: false}
-				got := noCSI.Wrap(tt.s, tt.width)
-				_ = got // just verify no panic
-				return
-			}
 			got := c.Wrap(tt.s, tt.width)
 			if got != tt.want {
 				t.Errorf("Wrap(%q, %d):\n got  %q\n want %q", tt.s, tt.width, got, tt.want)
 			}
 		})
 	}
+}
+
+func TestWrapWithoutControlSequences(t *testing.T) {
+	t.Parallel()
+	// When ControlSequences is false, escape bytes are visible chars
+	// and wrapping happens differently — just verify no panic.
+	c := &Condition{TabWidth: 4, ControlSequences: false}
+	red := "\x1b[31m"
+	reset := "\x1b[0m"
+	_ = c.Wrap(red+"helloworld"+reset, 5)
 }
 
 func TestWrapSGRCarryOverLineIndependence(t *testing.T) {
