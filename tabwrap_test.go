@@ -303,6 +303,17 @@ func TestPackageLevelFunctions(t *testing.T) {
 	if got := StringWidth("hello"); got != 5 {
 		t.Errorf("StringWidth = %d, want 5", got)
 	}
+	if got := ExpandTab("a\tb"); got != "a   b" {
+		t.Errorf("ExpandTab = %q, want %q", got, "a   b")
+	}
+	if got := ExpandTabFunc("abc\td", func(n int) string {
+		return "→" + strings.Repeat(" ", n-1)
+	}); got != "abc→d" {
+		t.Errorf("ExpandTabFunc = %q, want %q", got, "abc→d")
+	}
+	if got := Wrap("helloworld", 5); got != "hello\nworld" {
+		t.Errorf("Wrap = %q, want %q", got, "hello\nworld")
+	}
 	if got := Truncate("hello world", 8, "..."); got != "hello..." {
 		t.Errorf("Truncate = %q, want %q", got, "hello...")
 	}

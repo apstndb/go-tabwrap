@@ -265,6 +265,23 @@ func StringWidth(s string) int {
 	return defaultCondition.StringWidth(s)
 }
 
+// ExpandTab replaces every tab with spaces using default settings.
+func ExpandTab(s string) string {
+	return defaultCondition.ExpandTab(s)
+}
+
+// ExpandTabFunc replaces every tab using a custom callback with default settings.
+//
+// ExpandTabFunc panics if fn is nil.
+func ExpandTabFunc(s string, fn func(nSpaces int) string) string {
+	return defaultCondition.ExpandTabFunc(s, fn)
+}
+
+// Wrap wraps s to fit within width display columns using default settings.
+func Wrap(s string, width int) string {
+	return defaultCondition.Wrap(s, width)
+}
+
 // Truncate truncates s using default settings.
 func Truncate(s string, maxWidth int, tail string) string {
 	return defaultCondition.Truncate(s, maxWidth, tail)
