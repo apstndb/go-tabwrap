@@ -78,12 +78,14 @@ func main() {
 | `TabWidth` | 4 | Columns per tab stop |
 | `EastAsianWidth` | false | Treat ambiguous EA chars as width 2 |
 | `ControlSequences` | false | Treat 7-bit ANSI escapes as zero-width |
+| `ControlSequences8Bit` | false | Treat 8-bit ECMA-48 escapes as zero-width |
 
 Additional methods:
 
 | Method | Description |
 |---|---|
 | `ExpandTab(s) string` | Replace tabs with spaces |
+| `ExpandTabFunc(s, fn) string` | Replace tabs using a custom callback |
 | `Wrap(s, width) string` | Wrap to width columns (tabs expanded) |
 
 ## Acknowledgements
