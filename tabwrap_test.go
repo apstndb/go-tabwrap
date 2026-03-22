@@ -303,6 +303,17 @@ func TestPackageLevelFunctions(t *testing.T) {
 	if got := StringWidth("hello"); got != 5 {
 		t.Errorf("StringWidth = %d, want 5", got)
 	}
+	if got := ExpandTab("a\tb"); got != "a   b" {
+		t.Errorf("ExpandTab = %q, want %q", got, "a   b")
+	}
+	if got := ExpandTabFunc("abc\td", func(n int) string {
+		return "→" + strings.Repeat(" ", n-1)
+	}); got != "abc→d" {
+		t.Errorf("ExpandTabFunc = %q, want %q", got, "abc→d")
+	}
+	if got := Wrap("helloworld", 5); got != "hello\nworld" {
+		t.Errorf("Wrap = %q, want %q", got, "hello\nworld")
+	}
 	if got := Truncate("hello world", 8, "..."); got != "hello..." {
 		t.Errorf("Truncate = %q, want %q", got, "hello...")
 	}
@@ -378,6 +389,74 @@ func TestControlSequences(t *testing.T) {
 	})
 }
 
+func TestControlSequences8Bit(t *testing.T) {
+	t.Parallel()
+	// 8-bit CSI: 0x9b is the 8-bit equivalent of ESC [
+	csi8 := "\x9b31m"    // 8-bit CSI SGR red
+	reset8 := "\x9b0m"   // 8-bit CSI SGR reset
+	styled := csi8 + "hello" + reset8
+
+	t.Run("without ControlSequences8Bit", func(t *testing.T) {
+		t.Parallel()
+		c := &Condition{TabWidth: 4, ControlSequences: true}
+		got := c.StringWidth(styled)
+		if got <= 5 {
+			t.Errorf("expected width > 5 without ControlSequences8Bit, got %d", got)
+		}
+	})
+
+	t.Run("with ControlSequences8Bit", func(t *testing.T) {
+		t.Parallel()
+		c := &Condition{TabWidth: 4, ControlSequences: true, ControlSequences8Bit: true}
+		got := c.StringWidth(styled)
+		if got != 5 {
+			t.Errorf("StringWidth with ControlSequences8Bit = %d, want 5", got)
+		}
+	})
+}
+
+func TestWrapSGRCarryOver8Bit(t *testing.T) {
+	t.Parallel()
+	c := &Condition{TabWidth: 4, ControlSequences: true, ControlSequences8Bit: true}
+
+	red8 := "\x9b31m"
+	reset8 := "\x9b0m"
+
+	// emitNewline uses the 7-bit reset (\x1b[0m) which is universally understood,
+	// while replaying the original 8-bit sequences from sgrState.
+	reset7 := "\x1b[0m"
+
+	t.Run("single color wrap", func(t *testing.T) {
+		t.Parallel()
+		got := c.Wrap(red8+"helloworld"+reset8, 5)
+		want := red8 + "hello" + reset7 + "\n" + red8 + "world" + reset8
+		if got != want {
+			t.Errorf("Wrap 8-bit:\n got  %q\n want %q", got, want)
+		}
+	})
+
+	t.Run("line independence", func(t *testing.T) {
+		t.Parallel()
+		input := red8 + "hello world test" + reset8
+		got := c.Wrap(input, 5)
+		lines := strings.Split(got, "\n")
+
+		for i, line := range lines {
+			if !strings.HasPrefix(line, red8) {
+				t.Errorf("line %d %q: does not start with 8-bit red sequence", i, line)
+			}
+			// Reset may be 7-bit (emitNewline) or 8-bit (from input)
+			if !strings.Contains(line, reset7) && !strings.Contains(line, reset8) {
+				t.Errorf("line %d %q: does not contain any reset sequence", i, line)
+			}
+			w := c.StringWidth(line)
+			if w > 5 {
+				t.Errorf("line %d visible width = %d, want <= 5", i, w)
+			}
+		}
+	})
+}
+
 func TestWrapSGRCarryOver(t *testing.T) {
 	t.Parallel()
 	c := &Condition{TabWidth: 4, ControlSequences: true}
@@ -431,31 +510,27 @@ func TestWrapSGRCarryOver(t *testing.T) {
 			width: 10,
 			want:  dim + "NULL value" + reset + "\n" + dim + " here" + reset,
 		},
-		{
-			name:  "without ControlSequences unchanged",
-			s:     red + "helloworld" + reset,
-			width: 5,
-			// When ControlSequences is false, escape bytes are visible chars
-			// and wrapping happens differently - just verify no crash
-			want:  "", // skip exact match, just verify no panic
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if tt.name == "without ControlSequences unchanged" {
-				noCSI := &Condition{TabWidth: 4, ControlSequences: false}
-				got := noCSI.Wrap(tt.s, tt.width)
-				_ = got // just verify no panic
-				return
-			}
 			got := c.Wrap(tt.s, tt.width)
 			if got != tt.want {
 				t.Errorf("Wrap(%q, %d):\n got  %q\n want %q", tt.s, tt.width, got, tt.want)
 			}
 		})
 	}
+}
+
+func TestWrapWithoutControlSequences(t *testing.T) {
+	t.Parallel()
+	// When ControlSequences is false, escape bytes are visible chars
+	// and wrapping happens differently — just verify no panic.
+	c := &Condition{TabWidth: 4, ControlSequences: false}
+	red := "\x1b[31m"
+	reset := "\x1b[0m"
+	_ = c.Wrap(red+"helloworld"+reset, 5)
 }
 
 func TestWrapSGRCarryOverLineIndependence(t *testing.T) {
