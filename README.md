@@ -65,6 +65,9 @@ func main() {
 | Function | Description |
 |---|---|
 | `StringWidth(s) int` | Display width of s (tab & newline aware) |
+| `ExpandTab(s) string` | Replace tabs with spaces |
+| `ExpandTabFunc(s, fn) string` | Replace tabs using a custom callback |
+| `Wrap(s, width) string` | Wrap to width columns (tabs expanded) |
 | `Truncate(s, maxWidth, tail) string` | Truncate s, append tail if truncated |
 | `FillLeft(s, width) string` | Left-pad with spaces |
 | `FillRight(s, width) string` | Right-pad with spaces |
