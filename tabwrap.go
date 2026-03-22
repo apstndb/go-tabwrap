@@ -29,6 +29,10 @@ type Condition struct {
 	// as zero-width when true. This allows correct width measurement of
 	// strings containing terminal color codes and other SGR sequences.
 	ControlSequences bool
+	// ControlSequences8Bit treats 8-bit ECMA-48 escape sequences as zero-width
+	// when true. This extends ControlSequences to cover the 8-bit C1 control
+	// codes (0x80–0x9F based sequences).
+	ControlSequences8Bit bool
 }
 
 // NewCondition returns a Condition with default settings (TabWidth = 4).
@@ -45,8 +49,9 @@ func (c *Condition) tabWidth() int {
 
 func (c *Condition) options() displaywidth.Options {
 	return displaywidth.Options{
-		EastAsianWidth:   c.EastAsianWidth,
-		ControlSequences: c.ControlSequences,
+		EastAsianWidth:       c.EastAsianWidth,
+		ControlSequences:     c.ControlSequences,
+		ControlSequences8Bit: c.ControlSequences8Bit,
 	}
 }
 

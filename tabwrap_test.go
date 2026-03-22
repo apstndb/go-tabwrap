@@ -378,6 +378,32 @@ func TestControlSequences(t *testing.T) {
 	})
 }
 
+func TestControlSequences8Bit(t *testing.T) {
+	t.Parallel()
+	// 8-bit CSI: 0x9b is the 8-bit equivalent of ESC [
+	csi8 := "\x9b31m"    // 8-bit CSI SGR red
+	reset8 := "\x9b0m"   // 8-bit CSI SGR reset
+	styled := csi8 + "hello" + reset8
+
+	t.Run("without ControlSequences8Bit", func(t *testing.T) {
+		t.Parallel()
+		c := &Condition{TabWidth: 4, ControlSequences: true}
+		got := c.StringWidth(styled)
+		if got <= 5 {
+			t.Errorf("expected width > 5 without ControlSequences8Bit, got %d", got)
+		}
+	})
+
+	t.Run("with ControlSequences8Bit", func(t *testing.T) {
+		t.Parallel()
+		c := &Condition{TabWidth: 4, ControlSequences: true, ControlSequences8Bit: true}
+		got := c.StringWidth(styled)
+		if got != 5 {
+			t.Errorf("StringWidth with ControlSequences8Bit = %d, want 5", got)
+		}
+	})
+}
+
 func TestWrapSGRCarryOver(t *testing.T) {
 	t.Parallel()
 	c := &Condition{TabWidth: 4, ControlSequences: true}
