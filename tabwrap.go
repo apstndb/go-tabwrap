@@ -171,8 +171,9 @@ func (c *Condition) Wrap(s string, width int) string {
 		v := gs.Value()
 		w := gs.Width()
 
-		// Track SGR sequences (zero-width escape sequences starting with ESC).
-		if trackSGR && w == 0 && len(v) > 0 && v[0] == '\x1b' {
+		// Track SGR sequences (zero-width escape sequences starting with ESC
+		// or, when ControlSequences8Bit is enabled, with the 8-bit CSI byte 0x9b).
+		if trackSGR && w == 0 && len(v) > 0 && (v[0] == '\x1b' || v[0] == '\x9b') {
 			if isSGR(v) {
 				if isSGRReset(v) {
 					sgrState = sgrState[:0]
@@ -212,14 +213,25 @@ func (c *Condition) Wrap(s string, width int) string {
 }
 
 // isSGR reports whether s is a CSI SGR (Select Graphic Rendition) sequence.
-// SGR sequences have the form ESC [ <params> m.
+// It recognises both 7-bit (ESC [ <params> m) and 8-bit (0x9b <params> m) forms.
 func isSGR(s string) bool {
-	return len(s) >= 3 && s[0] == '\x1b' && s[1] == '[' && s[len(s)-1] == 'm'
+	if len(s) < 2 || s[len(s)-1] != 'm' {
+		return false
+	}
+	// 7-bit: ESC [ ... m
+	if len(s) >= 3 && s[0] == '\x1b' && s[1] == '[' {
+		return true
+	}
+	// 8-bit: 0x9b ... m
+	if s[0] == '\x9b' {
+		return true
+	}
+	return false
 }
 
 // isSGRReset reports whether s is an SGR reset sequence.
 func isSGRReset(s string) bool {
-	return s == "\x1b[0m" || s == "\x1b[m"
+	return s == "\x1b[0m" || s == "\x1b[m" || s == "\x9b0m" || s == "\x9bm"
 }
 
 // Truncate truncates s to fit within maxWidth display columns, appending tail

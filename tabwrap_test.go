@@ -415,6 +415,48 @@ func TestControlSequences8Bit(t *testing.T) {
 	})
 }
 
+func TestWrapSGRCarryOver8Bit(t *testing.T) {
+	t.Parallel()
+	c := &Condition{TabWidth: 4, ControlSequences: true, ControlSequences8Bit: true}
+
+	red8 := "\x9b31m"
+	reset8 := "\x9b0m"
+
+	// emitNewline uses the 7-bit reset (\x1b[0m) which is universally understood,
+	// while replaying the original 8-bit sequences from sgrState.
+	reset7 := "\x1b[0m"
+
+	t.Run("single color wrap", func(t *testing.T) {
+		t.Parallel()
+		got := c.Wrap(red8+"helloworld"+reset8, 5)
+		want := red8 + "hello" + reset7 + "\n" + red8 + "world" + reset8
+		if got != want {
+			t.Errorf("Wrap 8-bit:\n got  %q\n want %q", got, want)
+		}
+	})
+
+	t.Run("line independence", func(t *testing.T) {
+		t.Parallel()
+		input := red8 + "hello world test" + reset8
+		got := c.Wrap(input, 5)
+		lines := strings.Split(got, "\n")
+
+		for i, line := range lines {
+			if !strings.HasPrefix(line, red8) {
+				t.Errorf("line %d %q: does not start with 8-bit red sequence", i, line)
+			}
+			// Reset may be 7-bit (emitNewline) or 8-bit (from input)
+			if !strings.Contains(line, reset7) && !strings.Contains(line, reset8) {
+				t.Errorf("line %d %q: does not contain any reset sequence", i, line)
+			}
+			w := c.StringWidth(line)
+			if w > 5 {
+				t.Errorf("line %d visible width = %d, want <= 5", i, w)
+			}
+		}
+	})
+}
+
 func TestWrapSGRCarryOver(t *testing.T) {
 	t.Parallel()
 	c := &Condition{TabWidth: 4, ControlSequences: true}
