@@ -8,7 +8,7 @@
 // Width is measured in terminal display columns, by grapheme cluster rather
 // than rune. Tabs expand to tab stops, newlines reset the column, and the
 // width of a multi-line string is the width of its widest line. East Asian
-// ambiguous width and ECMA-48 control-sequence handling follow the active
+// ambiguous width and ECMA-48 control-sequence handling follows the active
 // [Condition] options.
 //
 // Key differences from [mattn/go-runewidth]:
@@ -260,6 +260,7 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 }
 
 // FillLeft pads s on the left with spaces to reach width display columns.
+// For multi-line strings, only the first line is padded.
 // Width is measured using the same rules as [Condition.StringWidth].
 // If s is already at least width columns wide it is returned unchanged.
 func (c *Condition) FillLeft(s string, width int) string {
@@ -271,6 +272,7 @@ func (c *Condition) FillLeft(s string, width int) string {
 }
 
 // FillRight pads s on the right with spaces to reach width display columns.
+// For multi-line strings, only the last line is padded.
 // Width is measured using the same rules as [Condition.StringWidth].
 // If s is already at least width columns wide it is returned unchanged.
 func (c *Condition) FillRight(s string, width int) string {

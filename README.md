@@ -17,7 +17,7 @@ Provides `StringWidth`, `ExpandTab`, `Wrap`, `Truncate`, `FillLeft`, and `FillRi
 `StringWidth` measures terminal display columns by **grapheme cluster**, not by
 rune count. That means emoji sequences, combining characters, and other
 multi-rune graphemes are counted as a single visible unit according to
-[displaywidth].
+[displaywidth](https://github.com/clipperhouse/displaywidth).
 
 Tabs expand to tab stops, newlines reset the column, and the width of a
 multi-line string is the width of its widest line. `EastAsianWidth`,
