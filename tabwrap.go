@@ -248,12 +248,15 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 		return tail
 	}
 
+	opts := c.options()
+	opts.ControlSequences8Bit = false
+
 	if !strings.Contains(s, "\t") {
-		return c.options().TruncateString(s, maxWidth, tail)
+		return opts.TruncateString(s, maxWidth, tail)
 	}
 
 	expanded := c.ExpandTab(s)
-	return c.options().TruncateString(expanded, maxWidth, tail)
+	return opts.TruncateString(expanded, maxWidth, tail)
 }
 
 // FillLeft pads s on the left with spaces to reach width display columns.

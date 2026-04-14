@@ -422,6 +422,19 @@ func TestControlSequences8Bit(t *testing.T) {
 			t.Errorf("StringWidth with ControlSequences8Bit only = %d, want 5", got)
 		}
 	})
+
+	t.Run("Truncate ignores ControlSequences8Bit", func(t *testing.T) {
+		t.Parallel()
+		s := csi8 + "hello world" + reset8
+		defaultCond := NewCondition()
+		c := &Condition{TabWidth: 4, ControlSequences8Bit: true}
+
+		got := c.Truncate(s, 8, "...")
+		want := defaultCond.Truncate(s, 8, "...")
+		if got != want {
+			t.Errorf("Truncate with ControlSequences8Bit = %q, want %q", got, want)
+		}
+	})
 }
 
 func TestWrapSGRCarryOver8Bit(t *testing.T) {
