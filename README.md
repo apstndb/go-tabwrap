@@ -9,7 +9,7 @@ Provides `StringWidth`, `ExpandTab`, `Wrap`, `Truncate`, `FillLeft`, and `FillRi
 - **Grapheme-cluster-aware** — emoji sequences and combining characters are measured correctly (via [displaywidth]).
 - **Tab-stop expansion** — every operation handles `\t` as an elastic tab stop, not a single character.
 - **Line wrapping** — `Wrap` breaks text to fit a column width. Tabs are indivisible: if a tab does not fit, it moves to the next line.
-- **ANSI escape sequence aware** — optional `ControlSequences` and `ControlSequences8Bit` modes treat 7-bit and 8-bit ECMA-48 escape sequences as zero-width, allowing correct measurement of styled terminal output. `Wrap` carries SGR state across line breaks, so each output line is independently styled.
+- **ANSI escape sequence aware** — optional `ControlSequences` mode treats 7-bit ECMA-48 escape sequences as zero-width, and optional `ControlSequences8Bit` mode treats 8-bit C1 ECMA-48 escape sequences as zero-width, allowing correct measurement of styled terminal output. `Wrap` carries recognized SGR state across line breaks, so each output line is independently styled.
 - **East Asian Width** — optional treatment of ambiguous characters as double-width.
 
 ## Install

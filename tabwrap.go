@@ -88,7 +88,7 @@ func (c *Condition) StringWidth(s string) int {
 // ExpandTab replaces every tab with spaces according to tab stops.
 // Columns reset at each newline.
 func (c *Condition) ExpandTab(s string) string {
-	return c.ExpandTabFunc(s, func(nSpaces int) string {
+	return c.expandTabFunc(s, c.options(), func(nSpaces int) string {
 		return strings.Repeat(" ", nSpaces)
 	})
 }
@@ -101,7 +101,10 @@ func (c *Condition) ExpandTab(s string) string {
 //
 // ExpandTabFunc panics if fn is nil.
 func (c *Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string {
-	opts := c.options()
+	return c.expandTabFunc(s, c.options(), fn)
+}
+
+func (c *Condition) expandTabFunc(s string, opts displaywidth.Options, fn func(nSpaces int) string) string {
 	tw := c.tabWidth()
 
 	var b strings.Builder
@@ -135,10 +138,13 @@ func (c *Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string 
 // Existing newlines are preserved. When width <= 0 the string is returned
 // with tabs expanded but no wrapping applied.
 //
-// When ControlSequences or ControlSequences8Bit is true, SGR (Select Graphic
-// Rendition) state is carried across line breaks: a reset is emitted before
-// each newline and the active SGR sequences are replayed after it. This
-// ensures each output line is independently styled.
+// When control-sequence handling is enabled, Wrap carries across line breaks
+// only those SGR (Select Graphic Rendition) sequences that are recognized as
+// zero-width under the active options: 7-bit sequences when ControlSequences
+// is true, and 8-bit sequences when ControlSequences8Bit is true. For those
+// sequences, a reset is emitted before each newline and the active SGR
+// sequences are replayed after it so each output line remains independently
+// styled.
 func (c *Condition) Wrap(s string, width int) string {
 	if width <= 0 {
 		return c.ExpandTab(s)
@@ -255,7 +261,9 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 		return opts.TruncateString(s, maxWidth, tail)
 	}
 
-	expanded := c.ExpandTab(s)
+	expanded := c.expandTabFunc(s, opts, func(nSpaces int) string {
+		return strings.Repeat(" ", nSpaces)
+	})
 	return opts.TruncateString(expanded, maxWidth, tail)
 }
 
