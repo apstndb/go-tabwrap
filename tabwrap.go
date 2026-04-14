@@ -31,7 +31,8 @@ type Condition struct {
 	ControlSequences bool
 	// ControlSequences8Bit treats 8-bit ECMA-48 escape sequences as zero-width
 	// when true. This extends ControlSequences to cover the 8-bit C1 control
-	// codes (0x80–0x9F based sequences).
+	// codes (0x80–0x9F based sequences). Truncate follows displaywidth and
+	// ignores this option.
 	ControlSequences8Bit bool
 }
 
@@ -134,10 +135,10 @@ func (c *Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string 
 // Existing newlines are preserved. When width <= 0 the string is returned
 // with tabs expanded but no wrapping applied.
 //
-// When ControlSequences is true, SGR (Select Graphic Rendition) state is
-// carried across line breaks: a reset is emitted before each newline and the
-// active SGR sequences are replayed after it. This ensures each output line
-// is independently styled.
+// When ControlSequences or ControlSequences8Bit is true, SGR (Select Graphic
+// Rendition) state is carried across line breaks: a reset is emitted before
+// each newline and the active SGR sequences are replayed after it. This
+// ensures each output line is independently styled.
 func (c *Condition) Wrap(s string, width int) string {
 	if width <= 0 {
 		return c.ExpandTab(s)
@@ -145,7 +146,11 @@ func (c *Condition) Wrap(s string, width int) string {
 
 	opts := c.options()
 	tw := c.tabWidth()
-	trackSGR := c.ControlSequences
+	trackSGR := c.ControlSequences || c.ControlSequences8Bit
+	resetSGR := "\x1b[0m"
+	if c.ControlSequences8Bit && !c.ControlSequences {
+		resetSGR = "\x9b0m"
+	}
 
 	var b strings.Builder
 	b.Grow(len(s))
@@ -156,7 +161,7 @@ func (c *Condition) Wrap(s string, width int) string {
 	// a reset before the newline and replays the current SGR state after it.
 	emitNewline := func() {
 		if trackSGR && len(sgrState) > 0 {
-			b.WriteString("\x1b[0m")
+			b.WriteString(resetSGR)
 		}
 		b.WriteByte('\n')
 		if trackSGR {
@@ -236,6 +241,8 @@ func isSGRReset(s string) bool {
 
 // Truncate truncates s to fit within maxWidth display columns, appending tail
 // if truncation occurs. Tabs are expanded before measuring.
+//
+// ControlSequences8Bit follows displaywidth and is ignored here.
 func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 	if maxWidth <= 0 {
 		return tail
