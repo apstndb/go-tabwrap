@@ -114,3 +114,5 @@ This package stands on the shoulders of:
 ## License
 
 MIT
+
+[displaywidth]: https://github.com/clipperhouse/displaywidth
