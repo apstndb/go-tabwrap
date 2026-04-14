@@ -5,6 +5,12 @@
 // truncation, and padding — the common building blocks for CLI table renderers
 // and TUI applications.
 //
+// Width is measured in terminal display columns, by grapheme cluster rather
+// than rune. Tabs expand to tab stops, newlines reset the column, and the
+// width of a multi-line string is the width of its widest line. East Asian
+// ambiguous width and ECMA-48 control-sequence handling follow the active
+// [Condition] options.
+//
 // Key differences from [mattn/go-runewidth]:
 //   - Grapheme-cluster-aware (emoji, combining characters) via displaywidth.
 //   - Built-in tab-stop expansion in every operation.
@@ -55,8 +61,12 @@ func (c *Condition) options() displaywidth.Options {
 	}
 }
 
-// StringWidth returns the display width of s, handling tabs and newlines.
-// For multi-line strings it returns the width of the widest line.
+// StringWidth returns the display width of s in terminal columns.
+//
+// Width is measured by grapheme cluster, not rune. Tabs expand to tab stops,
+// newlines reset the column, and for multi-line strings the result is the
+// width of the widest line. EastAsianWidth, ControlSequences, and
+// ControlSequences8Bit affect how individual graphemes are counted.
 func (c *Condition) StringWidth(s string) int {
 	opts := c.options()
 	tw := c.tabWidth()
@@ -250,6 +260,7 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 }
 
 // FillLeft pads s on the left with spaces to reach width display columns.
+// Width is measured using the same rules as [Condition.StringWidth].
 // If s is already at least width columns wide it is returned unchanged.
 func (c *Condition) FillLeft(s string, width int) string {
 	w := c.StringWidth(s)
@@ -260,6 +271,7 @@ func (c *Condition) FillLeft(s string, width int) string {
 }
 
 // FillRight pads s on the right with spaces to reach width display columns.
+// Width is measured using the same rules as [Condition.StringWidth].
 // If s is already at least width columns wide it is returned unchanged.
 func (c *Condition) FillRight(s string, width int) string {
 	w := c.StringWidth(s)
@@ -273,6 +285,7 @@ func (c *Condition) FillRight(s string, width int) string {
 var defaultCondition = NewCondition()
 
 // StringWidth returns the display width of s using default settings.
+// See [Condition.StringWidth] for the width model.
 func StringWidth(s string) int {
 	return defaultCondition.StringWidth(s)
 }
