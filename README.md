@@ -9,7 +9,7 @@ Provides `StringWidth`, `ExpandTab`, `Wrap`, `Truncate`, `FillLeft`, and `FillRi
 - **Grapheme-cluster-aware** — emoji sequences and combining characters are measured correctly (via [displaywidth]).
 - **Tab-stop expansion** — every operation handles `\t` as an elastic tab stop, not a single character.
 - **Line wrapping** — `Wrap` breaks text to fit a column width. Tabs are indivisible: if a tab does not fit, it moves to the next line.
-- **Optional trailing-space trimming** — `Condition.TrimTrailingSpace` removes trailing spaces and tabs from each wrapped output line.
+- **Optional trailing-space trimming** — `Condition.TrimTrailingSpace` removes trailing spaces and tabs from each output line produced by `Wrap`.
 - **ANSI escape sequence aware** — optional `ControlSequences` mode treats SGR and other 7-bit escape sequences as zero-width, allowing correct measurement of styled terminal output. `Wrap` carries SGR state across line breaks, so each output line is independently styled.
 - **East Asian Width** — optional treatment of ambiguous characters as double-width.
 

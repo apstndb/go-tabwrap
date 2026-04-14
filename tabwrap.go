@@ -251,16 +251,20 @@ func trimTrailingLineSpace(s string, opts displaywidth.Options) string {
 
 	gs := opts.StringGraphemes(s)
 	lastNonSpace := -1
+	lastVisible := -1
 	count := 0
 
 	for gs.Next() {
-		if gs.Width() > 0 && gs.Value() != " " && gs.Value() != "\t" {
-			lastNonSpace = count
+		if gs.Width() > 0 {
+			lastVisible = count
+			if gs.Value() != " " && gs.Value() != "\t" {
+				lastNonSpace = count
+			}
 		}
 		count++
 	}
 
-	if lastNonSpace == count-1 {
+	if lastVisible == lastNonSpace {
 		return s
 	}
 
