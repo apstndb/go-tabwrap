@@ -33,6 +33,10 @@ type Condition struct {
 	// when true. This extends ControlSequences to cover the 8-bit C1 control
 	// codes (0x80–0x9F based sequences).
 	ControlSequences8Bit bool
+	// TrimTrailingSpace removes trailing spaces and tabs from each output line
+	// produced by Wrap when true. This applies after wrapping, while preserving
+	// trailing zero-width control sequences on the line.
+	TrimTrailingSpace bool
 }
 
 // NewCondition returns a Condition with default settings (TabWidth = 4).
@@ -140,7 +144,11 @@ func (c *Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string 
 // is independently styled.
 func (c *Condition) Wrap(s string, width int) string {
 	if width <= 0 {
-		return c.ExpandTab(s)
+		result := c.ExpandTab(s)
+		if c.TrimTrailingSpace {
+			return c.trimWrappedLinesRight(result)
+		}
+		return result
 	}
 
 	opts := c.options()
@@ -209,6 +217,58 @@ func (c *Condition) Wrap(s string, width int) string {
 			col += w
 		}
 	}
+	result := b.String()
+	if c.TrimTrailingSpace {
+		return c.trimWrappedLinesRight(result)
+	}
+	return result
+}
+
+func (c *Condition) trimWrappedLinesRight(s string) string {
+	lines := strings.Split(s, "\n")
+	opts := c.options()
+
+	for i, line := range lines {
+		lines[i] = trimTrailingLineSpace(line, opts)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func trimTrailingLineSpace(s string, opts displaywidth.Options) string {
+	gs := opts.StringGraphemes(s)
+	graphemes := make([]string, 0, len(s))
+	widths := make([]int, 0, len(s))
+
+	for gs.Next() {
+		graphemes = append(graphemes, gs.Value())
+		widths = append(widths, gs.Width())
+	}
+
+	end := len(graphemes)
+	for end > 0 && widths[end-1] == 0 {
+		end--
+	}
+
+	trimEnd := end
+	for trimEnd > 0 && (graphemes[trimEnd-1] == " " || graphemes[trimEnd-1] == "\t") {
+		trimEnd--
+	}
+
+	if trimEnd == end {
+		return s
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+
+	for _, g := range graphemes[:trimEnd] {
+		b.WriteString(g)
+	}
+	for _, g := range graphemes[end:] {
+		b.WriteString(g)
+	}
+
 	return b.String()
 }
 
