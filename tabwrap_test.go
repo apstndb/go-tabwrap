@@ -3,6 +3,8 @@ package tabwrap
 import (
 	"strings"
 	"testing"
+
+	"github.com/clipperhouse/displaywidth"
 )
 
 func TestStringWidth(t *testing.T) {
@@ -229,6 +231,7 @@ func TestWrapTrimTrailingSpace(t *testing.T) {
 		}
 
 		for _, tt := range tests {
+			tt := tt
 			t.Run(tt.name, func(t *testing.T) {
 				t.Parallel()
 				got := c.Wrap(tt.s, tt.width)
@@ -249,6 +252,17 @@ func TestWrapTrimTrailingSpace(t *testing.T) {
 		want := red + "ab" + reset + "\n" + red + "cd" + reset
 		if got != want {
 			t.Errorf("Wrap styled trim = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("trims spaces around interleaved zero-width sequences", func(t *testing.T) {
+		t.Parallel()
+		opts := displaywidth.Options{ControlSequences: true}
+		input := "ab \x1b[0m \x1b[31m"
+		got := trimTrailingLineSpace(input, opts)
+		want := "ab\x1b[0m\x1b[31m"
+		if got != want {
+			t.Errorf("trimTrailingLineSpace(%q) = %q, want %q", input, got, want)
 		}
 	})
 }
