@@ -170,7 +170,7 @@ func TestExpandTabFunc(t *testing.T) {
 			t.Parallel()
 			defer func() {
 				if r := recover(); r == nil {
-					t.Error("ExpandTabFunc(s, nil) did not panic")
+					t.Errorf("%s: did not panic", name)
 				}
 			}()
 			fn()
