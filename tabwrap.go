@@ -29,10 +29,10 @@ type Condition struct {
 	// as zero-width when true. This allows correct width measurement of
 	// strings containing terminal color codes and other SGR sequences.
 	ControlSequences bool
-	// ControlSequences8Bit treats 8-bit ECMA-48 escape sequences as zero-width
-	// when true. This extends ControlSequences to cover the 8-bit C1 control
-	// codes (0x80–0x9F based sequences). Truncate follows displaywidth and
-	// ignores this option.
+	// ControlSequences8Bit treats 8-bit C1 ECMA-48 escape sequences as zero-width
+	// when true. It can be enabled independently of ControlSequences; enabling
+	// both covers both the 7-bit and 8-bit forms. Truncate follows displaywidth
+	// and ignores this option.
 	ControlSequences8Bit bool
 }
 
