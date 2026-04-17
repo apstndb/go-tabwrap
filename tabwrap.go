@@ -101,6 +101,9 @@ func (c *Condition) ExpandTab(s string) string {
 //
 // ExpandTabFunc panics if fn is nil.
 func (c *Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string {
+	if fn == nil {
+		panic("tabwrap: nil ExpandTabFunc callback")
+	}
 	return c.expandTabFunc(s, c.options(), fn)
 }
 

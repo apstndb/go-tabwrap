@@ -162,14 +162,29 @@ func TestExpandTabFunc(t *testing.T) {
 		}
 	})
 
-	t.Run("nil func panics", func(t *testing.T) {
-		t.Parallel()
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("ExpandTabFunc(s, nil) did not panic")
-			}
-		}()
+	assertPanics := func(t *testing.T, name string, fn func()) {
+		t.Helper()
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			defer func() {
+				if r := recover(); r == nil {
+					t.Error("ExpandTabFunc(s, nil) did not panic")
+				}
+			}()
+			fn()
+		})
+	}
+
+	assertPanics(t, "nil func panics with tab", func() {
 		c.ExpandTabFunc("a\tb", nil)
+	})
+
+	assertPanics(t, "nil func panics without tab", func() {
+		c.ExpandTabFunc("abc", nil)
+	})
+
+	assertPanics(t, "package-level nil func panics without tab", func() {
+		ExpandTabFunc("abc", nil)
 	})
 }
 
