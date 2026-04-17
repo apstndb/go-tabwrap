@@ -33,6 +33,11 @@ type Condition struct {
 	// when true. This extends ControlSequences to cover the 8-bit C1 control
 	// codes (0x80–0x9F based sequences).
 	ControlSequences8Bit bool
+	// TrimTrailingSpace removes trailing spaces and tabs from each output line
+	// produced by Wrap when true. This applies after wrapping, while preserving
+	// trailing zero-width graphemes on the line (for example, ANSI control
+	// sequences when ControlSequences or ControlSequences8Bit are enabled).
+	TrimTrailingSpace bool
 }
 
 // NewCondition returns a Condition with default settings (TabWidth = 4).
@@ -140,7 +145,11 @@ func (c *Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string 
 // is independently styled.
 func (c *Condition) Wrap(s string, width int) string {
 	if width <= 0 {
-		return c.ExpandTab(s)
+		result := c.ExpandTab(s)
+		if c.TrimTrailingSpace {
+			return trimWrappedLinesRight(result, c.options())
+		}
+		return result
 	}
 
 	opts := c.options()
@@ -209,6 +218,65 @@ func (c *Condition) Wrap(s string, width int) string {
 			col += w
 		}
 	}
+	result := b.String()
+	if c.TrimTrailingSpace {
+		return trimWrappedLinesRight(result, opts)
+	}
+	return result
+}
+
+func trimWrappedLinesRight(s string, opts displaywidth.Options) string {
+	var b strings.Builder
+	b.Grow(len(s))
+
+	start := 0
+	for {
+		idx := strings.IndexByte(s[start:], '\n')
+		if idx == -1 {
+			b.WriteString(trimTrailingLineSpace(s[start:], opts))
+			return b.String()
+		}
+
+		end := start + idx
+		b.WriteString(trimTrailingLineSpace(s[start:end], opts))
+		b.WriteByte('\n')
+		start = end + 1
+	}
+}
+
+func trimTrailingLineSpace(s string, opts displaywidth.Options) string {
+	if !opts.ControlSequences && !opts.ControlSequences8Bit {
+		return strings.TrimRight(s, " \t")
+	}
+
+	gs := opts.StringGraphemes(s)
+	lastNonSpace := -1
+	lastVisible := -1
+	count := 0
+
+	for gs.Next() {
+		if gs.Width() > 0 {
+			lastVisible = count
+			if gs.Value() != " " && gs.Value() != "\t" {
+				lastNonSpace = count
+			}
+		}
+		count++
+	}
+
+	if lastVisible == lastNonSpace {
+		return s
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+	gs = opts.StringGraphemes(s)
+	for i := 0; gs.Next(); i++ {
+		if i <= lastNonSpace || gs.Width() == 0 {
+			b.WriteString(gs.Value())
+		}
+	}
+
 	return b.String()
 }
 

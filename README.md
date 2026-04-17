@@ -9,6 +9,7 @@ Provides `StringWidth`, `ExpandTab`, `Wrap`, `Truncate`, `FillLeft`, and `FillRi
 - **Grapheme-cluster-aware** — emoji sequences and combining characters are measured correctly (via [displaywidth]).
 - **Tab-stop expansion** — every operation handles `\t` as an elastic tab stop, not a single character.
 - **Line wrapping** — `Wrap` breaks text to fit a column width. Tabs are indivisible: if a tab does not fit, it moves to the next line.
+- **Optional trailing-space trimming** — `Condition.TrimTrailingSpace` removes trailing spaces and tabs from each output line produced by `Wrap`.
 - **ANSI escape sequence aware** — optional `ControlSequences` mode treats SGR and other 7-bit escape sequences as zero-width, allowing correct measurement of styled terminal output. `Wrap` carries SGR state across line breaks, so each output line is independently styled.
 - **East Asian Width** — optional treatment of ambiguous characters as double-width.
 
@@ -44,6 +45,9 @@ func main() {
 	fmt.Println(c.StringWidth("\t"))            // 8
 	fmt.Println(c.Wrap("hello world", 5))       // "hello\n world"
 	fmt.Println(c.ExpandTab("a\tb"))            // "a       b"
+
+	trimmed := &tabwrap.Condition{TabWidth: 4, TrimTrailingSpace: true}
+	fmt.Println(trimmed.Wrap("ab\tcd", 4))      // "ab\ncd"
 
 	// ANSI escape sequences: measure visible width only.
 	ansi := &tabwrap.Condition{TabWidth: 4, ControlSequences: true}
@@ -82,6 +86,7 @@ func main() {
 | `EastAsianWidth` | false | Treat ambiguous EA chars as width 2 |
 | `ControlSequences` | false | Treat 7-bit ANSI escapes as zero-width |
 | `ControlSequences8Bit` | false | Treat 8-bit ECMA-48 escapes as zero-width |
+| `TrimTrailingSpace` | false | Trim trailing spaces and tabs from each `Wrap` output line |
 
 Additional methods:
 
