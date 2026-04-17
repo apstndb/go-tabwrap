@@ -9,8 +9,22 @@ Provides `StringWidth`, `ExpandTab`, `Wrap`, `Truncate`, `FillLeft`, and `FillRi
 - **Grapheme-cluster-aware** — emoji sequences and combining characters are measured correctly (via [displaywidth]).
 - **Tab-stop expansion** — every operation handles `\t` as an elastic tab stop, not a single character.
 - **Line wrapping** — `Wrap` breaks text to fit a column width. Tabs are indivisible: if a tab does not fit, it moves to the next line.
+- **Optional trailing-space trimming** — `Condition.TrimTrailingSpace` removes trailing spaces and tabs from each output line produced by `Wrap`.
 - **ANSI escape sequence aware** — optional `ControlSequences` mode treats 7-bit ECMA-48 escape sequences as zero-width, and optional `ControlSequences8Bit` mode treats 8-bit C1 ECMA-48 escape sequences as zero-width, allowing correct measurement of styled terminal output. `Wrap` carries recognized SGR state across line breaks, so each output line is independently styled.
 - **East Asian Width** — optional treatment of ambiguous characters as double-width.
+
+## Width semantics
+
+`StringWidth` measures terminal display columns by **grapheme cluster**, not by
+rune count. That means emoji sequences, combining characters, and other
+multi-rune graphemes are counted as a single visible unit according to
+[displaywidth](https://github.com/clipperhouse/displaywidth).
+
+Tabs expand to tab stops, newlines reset the column, and the width of a
+multi-line string is the width of its widest line. `EastAsianWidth`,
+`ControlSequences`, and `ControlSequences8Bit` adjust how individual graphemes
+are counted, and `FillLeft`, `FillRight`, and `Wrap` all use the same width
+model.
 
 ## Install
 
@@ -44,6 +58,9 @@ func main() {
 	fmt.Println(c.StringWidth("\t"))            // 8
 	fmt.Println(c.Wrap("hello world", 5))       // "hello\n world"
 	fmt.Println(c.ExpandTab("a\tb"))            // "a       b"
+
+	trimmed := &tabwrap.Condition{TabWidth: 4, TrimTrailingSpace: true}
+	fmt.Println(trimmed.Wrap("ab\tcd", 4))      // "ab\ncd"
 
 	// ANSI escape sequences: measure visible width only.
 	ansi := &tabwrap.Condition{TabWidth: 4, ControlSequences: true}
@@ -82,6 +99,7 @@ func main() {
 | `EastAsianWidth` | false | Treat ambiguous EA chars as width 2 |
 | `ControlSequences` | false | Treat 7-bit ANSI escapes as zero-width |
 | `ControlSequences8Bit` | false | Treat 8-bit ECMA-48 escapes as zero-width |
+| `TrimTrailingSpace` | false | Trim trailing spaces and tabs from each `Wrap` output line |
 
 `ControlSequences8Bit` affects width calculation and wrapping. `Truncate` follows
 [displaywidth] and ignores `ControlSequences8Bit`, even when it is enabled for
@@ -108,3 +126,5 @@ This package stands on the shoulders of:
 ## License
 
 MIT
+
+[displaywidth]: https://github.com/clipperhouse/displaywidth

@@ -3,6 +3,8 @@ package tabwrap
 import (
 	"strings"
 	"testing"
+
+	"github.com/clipperhouse/displaywidth"
 )
 
 func TestStringWidth(t *testing.T) {
@@ -222,6 +224,62 @@ func TestWrap(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWrapTrimTrailingSpace(t *testing.T) {
+	t.Parallel()
+
+	t.Run("trimmed plain output", func(t *testing.T) {
+		t.Parallel()
+		c := &Condition{TabWidth: 4, TrimTrailingSpace: true}
+
+		tests := []struct {
+			name  string
+			s     string
+			width int
+			want  string
+		}{
+			{"tab before wrap boundary", "ab\tcd", 4, "ab\ncd"},
+			{"tab at end of line", "abc\t", 4, "abc"},
+			{"natural newline", "ab\t\ncd\t", 10, "ab\ncd"},
+			{"width zero still trims", "abc\t", 0, "abc"},
+		}
+
+		for _, tt := range tests {
+			tt := tt
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+				got := c.Wrap(tt.s, tt.width)
+				if got != tt.want {
+					t.Errorf("Wrap(%q, %d) = %q, want %q", tt.s, tt.width, got, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("preserves trailing control sequences", func(t *testing.T) {
+		t.Parallel()
+		c := &Condition{TabWidth: 4, ControlSequences: true, TrimTrailingSpace: true}
+		red := "\x1b[31m"
+		reset := "\x1b[0m"
+
+		got := c.Wrap(red+"ab\tcd"+reset, 4)
+		want := red + "ab" + reset + "\n" + red + "cd" + reset
+		if got != want {
+			t.Errorf("Wrap styled trim = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("trims spaces around interleaved zero-width sequences", func(t *testing.T) {
+		t.Parallel()
+		opts := displaywidth.Options{ControlSequences: true}
+		input := "ab \x1b[0m \x1b[31m"
+		got := trimTrailingLineSpace(input, opts)
+		want := "ab\x1b[0m\x1b[31m"
+		if got != want {
+			t.Errorf("trimTrailingLineSpace(%q) = %q, want %q", input, got, want)
+		}
+	})
 }
 
 func TestTruncate(t *testing.T) {
