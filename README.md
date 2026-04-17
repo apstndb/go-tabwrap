@@ -13,6 +13,19 @@ Provides `StringWidth`, `ExpandTab`, `Wrap`, `Truncate`, `FillLeft`, and `FillRi
 - **ANSI escape sequence aware** — optional `ControlSequences` mode treats SGR and other 7-bit escape sequences as zero-width, allowing correct measurement of styled terminal output. `Wrap` carries SGR state across line breaks, so each output line is independently styled.
 - **East Asian Width** — optional treatment of ambiguous characters as double-width.
 
+## Width semantics
+
+`StringWidth` measures terminal display columns by **grapheme cluster**, not by
+rune count. That means emoji sequences, combining characters, and other
+multi-rune graphemes are counted as a single visible unit according to
+[displaywidth](https://github.com/clipperhouse/displaywidth).
+
+Tabs expand to tab stops, newlines reset the column, and the width of a
+multi-line string is the width of its widest line. `EastAsianWidth`,
+`ControlSequences`, and `ControlSequences8Bit` adjust how individual graphemes
+are counted, and `FillLeft`, `FillRight`, and `Wrap` all use the same width
+model.
+
 ## Install
 
 ```
@@ -106,3 +119,5 @@ This package stands on the shoulders of:
 ## License
 
 MIT
+
+[displaywidth]: https://github.com/clipperhouse/displaywidth
