@@ -248,7 +248,10 @@ func isSGRReset(s string) bool {
 // Truncate truncates s to fit within maxWidth display columns, appending tail
 // if truncation occurs. Tabs are expanded before measuring.
 //
-// ControlSequences8Bit follows displaywidth and is ignored here.
+// ControlSequences8Bit follows displaywidth and is ignored here, even when it
+// is enabled for StringWidth and Wrap. This can make 8-bit C1 sequences count
+// as zero-width for measurement but not for truncation; go-tabwrap keeps that
+// behavior to avoid mis-parsing UTF-8 byte sequences as standalone C1 controls.
 func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 	if maxWidth <= 0 {
 		return tail

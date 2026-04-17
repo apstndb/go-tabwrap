@@ -84,7 +84,10 @@ func main() {
 | `ControlSequences8Bit` | false | Treat 8-bit ECMA-48 escapes as zero-width |
 
 `ControlSequences8Bit` affects width calculation and wrapping. `Truncate` follows
-[displaywidth] and ignores `ControlSequences8Bit`, because 8-bit C1 bytes can
+[displaywidth] and ignores `ControlSequences8Bit`, even when it is enabled for
+`StringWidth` and `Wrap`. That means 8-bit C1 sequences may measure as
+zero-width or wrap correctly, but still count during truncation. go-tabwrap
+keeps that behavior because parsing raw 8-bit C1 bytes during truncation can
 conflict with UTF-8 byte boundaries.
 
 Additional methods:
