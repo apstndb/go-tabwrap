@@ -114,11 +114,9 @@ func (c *Condition) ExpandTab(s string) string {
 // is responsible for returning a string whose display width equals nSpaces if
 // alignment matters. Columns reset at each newline.
 //
-// ExpandTabFunc panics if fn is nil.
+// ExpandTabFunc panics if fn is nil and s contains a tab, because fn is only
+// called when a tab is encountered.
 func (c *Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string {
-	if fn == nil {
-		panic("tabwrap: nil ExpandTabFunc callback")
-	}
 	return c.expandTabFunc(s, c.options(), fn)
 }
 
@@ -393,7 +391,8 @@ func ExpandTab(s string) string {
 
 // ExpandTabFunc replaces every tab using a custom callback with default settings.
 //
-// ExpandTabFunc panics if fn is nil.
+// ExpandTabFunc panics if fn is nil and s contains a tab, because fn is only
+// called when a tab is encountered.
 func ExpandTabFunc(s string, fn func(nSpaces int) string) string {
 	return defaultCondition.ExpandTabFunc(s, fn)
 }
