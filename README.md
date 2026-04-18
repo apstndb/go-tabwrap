@@ -10,7 +10,7 @@ Provides `StringWidth`, `ExpandTab`, `Wrap`, `Truncate`, `FillLeft`, and `FillRi
 - **Tab-stop expansion** — every operation handles `\t` as an elastic tab stop, not a single character.
 - **Line wrapping** — `Wrap` breaks text to fit a column width. Tabs are indivisible: if a tab does not fit, it moves to the next line.
 - **Optional trailing-space trimming** — `Condition.TrimTrailingSpace` removes trailing spaces and tabs from each output line produced by `Wrap`.
-- **ANSI escape sequence aware** — optional `ControlSequences` mode treats SGR and other 7-bit escape sequences as zero-width, allowing correct measurement of styled terminal output. `Wrap` carries SGR state across line breaks, so each output line is independently styled.
+- **ANSI escape sequence aware** — optional `ControlSequences` mode treats 7-bit ECMA-48 escape sequences as zero-width, and optional `ControlSequences8Bit` mode treats 8-bit C1 ECMA-48 escape sequences as zero-width, allowing correct measurement of styled terminal output. `Wrap` carries recognized SGR state across line breaks, so each output line is independently styled.
 - **East Asian Width** — optional treatment of ambiguous characters as double-width.
 
 ## Width semantics
@@ -100,6 +100,13 @@ func main() {
 | `ControlSequences` | false | Treat 7-bit ANSI escapes as zero-width |
 | `ControlSequences8Bit` | false | Treat 8-bit ECMA-48 escapes as zero-width |
 | `TrimTrailingSpace` | false | Trim trailing spaces and tabs from each `Wrap` output line |
+
+`ControlSequences8Bit` affects width calculation and wrapping. `Truncate` follows
+[displaywidth] and ignores `ControlSequences8Bit`, even when it is enabled for
+`StringWidth` and `Wrap`. That means 8-bit C1 sequences may measure as
+zero-width or wrap correctly, but still count during truncation. go-tabwrap
+keeps that behavior because parsing raw 8-bit C1 bytes during truncation can
+conflict with UTF-8 byte boundaries.
 
 Additional methods:
 

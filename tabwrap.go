@@ -35,9 +35,10 @@ type Condition struct {
 	// as zero-width when true. This allows correct width measurement of
 	// strings containing terminal color codes and other SGR sequences.
 	ControlSequences bool
-	// ControlSequences8Bit treats 8-bit ECMA-48 escape sequences as zero-width
-	// when true. This extends ControlSequences to cover the 8-bit C1 control
-	// codes (0x80–0x9F based sequences).
+	// ControlSequences8Bit treats 8-bit C1 ECMA-48 escape sequences as zero-width
+	// when true. It can be enabled independently of ControlSequences; enabling
+	// both covers both the 7-bit and 8-bit forms. Truncate follows displaywidth
+	// and ignores this option.
 	ControlSequences8Bit bool
 	// TrimTrailingSpace removes trailing spaces and tabs from each output line
 	// produced by Wrap when true. This applies after wrapping, while preserving
@@ -102,7 +103,7 @@ func (c *Condition) StringWidth(s string) int {
 // ExpandTab replaces every tab with spaces according to tab stops.
 // Columns reset at each newline.
 func (c *Condition) ExpandTab(s string) string {
-	return c.ExpandTabFunc(s, func(nSpaces int) string {
+	return c.expandTabFunc(s, c.options(), func(nSpaces int) string {
 		return strings.Repeat(" ", nSpaces)
 	})
 }
@@ -113,9 +114,13 @@ func (c *Condition) ExpandTab(s string) string {
 // is responsible for returning a string whose display width equals nSpaces if
 // alignment matters. Columns reset at each newline.
 //
-// ExpandTabFunc panics if fn is nil.
+// ExpandTabFunc panics if fn is nil and s contains a tab, because fn is only
+// called when a tab is encountered.
 func (c *Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string {
-	opts := c.options()
+	return c.expandTabFunc(s, c.options(), fn)
+}
+
+func (c *Condition) expandTabFunc(s string, opts displaywidth.Options, fn func(nSpaces int) string) string {
 	tw := c.tabWidth()
 
 	var b strings.Builder
@@ -149,10 +154,13 @@ func (c *Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string 
 // Existing newlines are preserved. When width <= 0 the string is returned
 // with tabs expanded but no wrapping applied.
 //
-// When ControlSequences is true, SGR (Select Graphic Rendition) state is
-// carried across line breaks: a reset is emitted before each newline and the
-// active SGR sequences are replayed after it. This ensures each output line
-// is independently styled.
+// When control-sequence handling is enabled, Wrap carries across line breaks
+// only those SGR (Select Graphic Rendition) sequences that are recognized as
+// zero-width under the active options: 7-bit sequences when ControlSequences
+// is true, and 8-bit sequences when ControlSequences8Bit is true. For those
+// sequences, a reset is emitted before each newline and the active SGR
+// sequences are replayed after it so each output line remains independently
+// styled.
 func (c *Condition) Wrap(s string, width int) string {
 	if width <= 0 {
 		result := c.ExpandTab(s)
@@ -164,7 +172,11 @@ func (c *Condition) Wrap(s string, width int) string {
 
 	opts := c.options()
 	tw := c.tabWidth()
-	trackSGR := c.ControlSequences
+	trackSGR := c.ControlSequences || c.ControlSequences8Bit
+	resetSGR := "\x1b[0m"
+	if c.ControlSequences8Bit && !c.ControlSequences {
+		resetSGR = "\x9b0m"
+	}
 
 	var b strings.Builder
 	b.Grow(len(s))
@@ -175,7 +187,7 @@ func (c *Condition) Wrap(s string, width int) string {
 	// a reset before the newline and replays the current SGR state after it.
 	emitNewline := func() {
 		if trackSGR && len(sgrState) > 0 {
-			b.WriteString("\x1b[0m")
+			b.WriteString(resetSGR)
 		}
 		b.WriteByte('\n')
 		if trackSGR {
@@ -314,17 +326,27 @@ func isSGRReset(s string) bool {
 
 // Truncate truncates s to fit within maxWidth display columns, appending tail
 // if truncation occurs. Tabs are expanded before measuring.
+//
+// ControlSequences8Bit follows displaywidth and is ignored here, even when it
+// is enabled for StringWidth and Wrap. This can make 8-bit C1 sequences count
+// as zero-width for measurement but not for truncation; go-tabwrap keeps that
+// behavior to avoid mis-parsing UTF-8 byte sequences as standalone C1 controls.
 func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 	if maxWidth <= 0 {
 		return tail
 	}
 
+	opts := c.options()
+	opts.ControlSequences8Bit = false
+
 	if !strings.Contains(s, "\t") {
-		return c.options().TruncateString(s, maxWidth, tail)
+		return opts.TruncateString(s, maxWidth, tail)
 	}
 
-	expanded := c.ExpandTab(s)
-	return c.options().TruncateString(expanded, maxWidth, tail)
+	expanded := c.expandTabFunc(s, opts, func(nSpaces int) string {
+		return strings.Repeat(" ", nSpaces)
+	})
+	return opts.TruncateString(expanded, maxWidth, tail)
 }
 
 // FillLeft pads s on the left with spaces to reach width display columns.
@@ -369,7 +391,8 @@ func ExpandTab(s string) string {
 
 // ExpandTabFunc replaces every tab using a custom callback with default settings.
 //
-// ExpandTabFunc panics if fn is nil.
+// ExpandTabFunc panics if fn is nil and s contains a tab, because fn is only
+// called when a tab is encountered.
 func ExpandTabFunc(s string, fn func(nSpaces int) string) string {
 	return defaultCondition.ExpandTabFunc(s, fn)
 }
