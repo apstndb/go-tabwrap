@@ -302,6 +302,7 @@ func TestTruncate(t *testing.T) {
 		{"no truncation", "hello", 10, "...", "hello"},
 		{"exact fit", "hello", 5, "...", "hello"},
 		{"truncate with tail", "hello world", 8, "...", "hello..."},
+		{"truncate clamps wide tail", "hello", 1, "...", "."},
 		{"empty string", "", 5, "...", ""},
 		{"CJK truncate", "日本語テスト", 7, "...", "日本..."},
 		{"tab in string fits", "a\tb", 5, "...", "a   b"},
@@ -315,6 +316,9 @@ func TestTruncate(t *testing.T) {
 			got := c.Truncate(tt.s, tt.maxWidth, tt.tail)
 			if got != tt.want {
 				t.Errorf("Truncate(%q, %d, %q) = %q, want %q", tt.s, tt.maxWidth, tt.tail, got, tt.want)
+			}
+			if tt.maxWidth > 0 && c.StringWidth(got) > tt.maxWidth {
+				t.Errorf("Truncate(%q, %d, %q) visible width = %d, want <= %d", tt.s, tt.maxWidth, tt.tail, c.StringWidth(got), tt.maxWidth)
 			}
 		})
 	}
@@ -335,6 +339,8 @@ func TestFillLeft(t *testing.T) {
 		{"wider than width", "hello world", 5, "hello world"},
 		{"empty string", "", 3, "   "},
 		{"CJK", "日本", 6, "  日本"},
+		{"tab expands before left padding", "a\tb", 8, "   a   b"},
+		{"tab exact width unchanged", "a\tb", 5, "a\tb"},
 	}
 
 	for _, tt := range tests {
@@ -343,6 +349,9 @@ func TestFillLeft(t *testing.T) {
 			got := c.FillLeft(tt.s, tt.width)
 			if got != tt.want {
 				t.Errorf("FillLeft(%q, %d) = %q, want %q", tt.s, tt.width, got, tt.want)
+			}
+			if c.StringWidth(got) != max(c.StringWidth(tt.want), tt.width) {
+				t.Errorf("FillLeft(%q, %d) visible width = %d, want %d", tt.s, tt.width, c.StringWidth(got), max(c.StringWidth(tt.want), tt.width))
 			}
 		})
 	}
@@ -396,8 +405,14 @@ func TestPackageLevelFunctions(t *testing.T) {
 	if got := Truncate("hello world", 8, "..."); got != "hello..." {
 		t.Errorf("Truncate = %q, want %q", got, "hello...")
 	}
+	if got := Truncate("hello", 1, "..."); got != "." {
+		t.Errorf("Truncate wide tail = %q, want %q", got, ".")
+	}
 	if got := FillLeft("hi", 5); got != "   hi" {
 		t.Errorf("FillLeft = %q, want %q", got, "   hi")
+	}
+	if got := FillLeft("a\tb", 8); got != "   a   b" {
+		t.Errorf("FillLeft tab = %q, want %q", got, "   a   b")
 	}
 	if got := FillRight("hi", 5); got != "hi   " {
 		t.Errorf("FillRight = %q, want %q", got, "hi   ")

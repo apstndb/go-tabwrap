@@ -325,7 +325,8 @@ func isSGRReset(s string) bool {
 }
 
 // Truncate truncates s to fit within maxWidth display columns, appending tail
-// if truncation occurs. Tabs are expanded before measuring.
+// if truncation occurs. Tabs are expanded before measuring. If tail itself is
+// too wide to fit, it is truncated first so the result still fits maxWidth.
 //
 // ControlSequences8Bit follows displaywidth and is ignored here, even when it
 // is enabled for StringWidth and Wrap. This can make 8-bit C1 sequences count
@@ -338,6 +339,12 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 
 	opts := c.options()
 	opts.ControlSequences8Bit = false
+	if strings.Contains(tail, "\t") {
+		tail = c.expandTabFunc(tail, opts, func(nSpaces int) string {
+			return strings.Repeat(" ", nSpaces)
+		})
+	}
+	tail = opts.TruncateString(tail, maxWidth, "")
 
 	if !strings.Contains(s, "\t") {
 		return opts.TruncateString(s, maxWidth, tail)
@@ -352,12 +359,17 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 // FillLeft pads s on the left with spaces to reach width display columns.
 // For multi-line strings, padding is computed from the widest line but is
 // added only at the start of the full string, so only the first line changes.
-// Width is measured using the same rules as [Condition.StringWidth].
+// Width is measured using the same rules as [Condition.StringWidth]. When left
+// padding is needed, tabs are expanded first so the added spaces do not shift
+// later tab stops.
 // If s is already at least width columns wide it is returned unchanged.
 func (c *Condition) FillLeft(s string, width int) string {
 	w := c.StringWidth(s)
 	if w >= width {
 		return s
+	}
+	if strings.Contains(s, "\t") {
+		s = c.ExpandTab(s)
 	}
 	return strings.Repeat(" ", width-w) + s
 }
