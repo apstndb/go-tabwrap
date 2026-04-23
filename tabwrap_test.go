@@ -341,6 +341,7 @@ func TestFillLeft(t *testing.T) {
 		{"CJK", "日本", 6, "  日本"},
 		{"tab expands before left padding", "a\tb", 8, "   a   b"},
 		{"tab exact width unchanged", "a\tb", 5, "a\tb"},
+		{"only first line tabs expand", "a\tb\nc\td", 8, "   a   b\nc\td"},
 	}
 
 	for _, tt := range tests {

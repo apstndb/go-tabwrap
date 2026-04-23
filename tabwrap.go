@@ -324,9 +324,10 @@ func isSGRReset(s string) bool {
 	return s == "\x1b[0m" || s == "\x1b[m" || s == "\x9b0m" || s == "\x9bm"
 }
 
-// Truncate truncates s to fit within maxWidth display columns, appending tail
-// if truncation occurs. Tabs are expanded before measuring. If tail itself is
-// too wide to fit, it is truncated first so the result still fits maxWidth.
+// Truncate truncates s to fit within positive maxWidth display columns,
+// appending tail if truncation occurs. Tabs are expanded before measuring. If
+// tail itself is too wide to fit, it is truncated first so the result still
+// fits maxWidth. When maxWidth <= 0, tail is returned as-is.
 //
 // ControlSequences8Bit follows displaywidth and is ignored here, even when it
 // is enabled for StringWidth and Wrap. This can make 8-bit C1 sequences count
@@ -360,16 +361,22 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 // For multi-line strings, padding is computed from the widest line but is
 // added only at the start of the full string, so only the first line changes.
 // Width is measured using the same rules as [Condition.StringWidth]. When left
-// padding is needed, tabs are expanded first so the added spaces do not shift
-// later tab stops.
+// padding is needed, tabs in the first line are expanded first so the added
+// spaces do not shift later tab stops there.
 // If s is already at least width columns wide it is returned unchanged.
 func (c *Condition) FillLeft(s string, width int) string {
 	w := c.StringWidth(s)
 	if w >= width {
 		return s
 	}
-	if strings.Contains(s, "\t") {
-		s = c.ExpandTab(s)
+	first, rest, found := strings.Cut(s, "\n")
+	if strings.Contains(first, "\t") {
+		first = c.ExpandTab(first)
+		if found {
+			s = first + "\n" + rest
+		} else {
+			s = first
+		}
 	}
 	return strings.Repeat(" ", width-w) + s
 }

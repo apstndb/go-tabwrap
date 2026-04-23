@@ -85,7 +85,7 @@ func main() {
 | `ExpandTab(s) string` | Replace tabs with spaces |
 | `ExpandTabFunc(s, fn) string` | Replace tabs using a custom callback |
 | `Wrap(s, width) string` | Wrap to width columns (tabs expanded) |
-| `Truncate(s, maxWidth, tail) string` | Truncate s, append tail if truncated, and keep the result within `maxWidth` |
+| `Truncate(s, maxWidth, tail) string` | Truncate s, append tail if truncated, and for positive `maxWidth` keep the result within `maxWidth` (`maxWidth <= 0` returns `tail` as-is) |
 | `FillLeft(s, width) string` | Left-pad with spaces |
 | `FillRight(s, width) string` | Right-pad with spaces |
 
