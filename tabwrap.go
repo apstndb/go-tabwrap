@@ -364,7 +364,6 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 // rules as [Condition.StringWidth]. When left padding is needed, tabs in the
 // first line are expanded first so the added spaces do not shift later tab
 // stops there.
-// If s is already at least width columns wide it is returned unchanged.
 func (c *Condition) FillLeft(s string, width int) string {
 	if c.StringWidth(s) >= width {
 		return s
