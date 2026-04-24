@@ -358,27 +358,31 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 }
 
 // FillLeft pads s on the left with spaces to reach width display columns.
-// For multi-line strings, padding is computed from the widest line but is
-// added only at the start of the full string, so only the first line changes.
-// Width is measured using the same rules as [Condition.StringWidth]. When left
-// padding is needed, tabs in the first line are expanded first so the added
-// spaces do not shift later tab stops there.
+// For multi-line strings, padding is added only at the start of the full
+// string, so only the first line changes. If another line is already at least
+// width columns wide, s is returned unchanged. Width is measured using the same
+// rules as [Condition.StringWidth]. When left padding is needed, tabs in the
+// first line are expanded first so the added spaces do not shift later tab
+// stops there.
 // If s is already at least width columns wide it is returned unchanged.
 func (c *Condition) FillLeft(s string, width int) string {
-	w := c.StringWidth(s)
-	if w >= width {
+	if c.StringWidth(s) >= width {
 		return s
 	}
 	first, rest, found := strings.Cut(s, "\n")
 	if strings.Contains(first, "\t") {
 		first = c.ExpandTab(first)
-		if found {
-			s = first + "\n" + rest
-		} else {
-			s = first
-		}
 	}
-	return strings.Repeat(" ", width-w) + s
+	pad := width - c.StringWidth(first)
+	var b strings.Builder
+	b.Grow(len(s) + pad)
+	b.WriteString(strings.Repeat(" ", pad))
+	b.WriteString(first)
+	if found {
+		b.WriteByte('\n')
+		b.WriteString(rest)
+	}
+	return b.String()
 }
 
 // FillRight pads s on the right with spaces to reach width display columns.

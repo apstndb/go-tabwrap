@@ -339,6 +339,7 @@ func TestFillLeft(t *testing.T) {
 		{"wider than width", "hello world", 5, "hello world"},
 		{"empty string", "", 3, "   "},
 		{"CJK", "日本", 6, "  日本"},
+		{"first line not widest", "a\nbc", 3, "  a\nbc"},
 		{"tab expands before left padding", "a\tb", 8, "   a   b"},
 		{"tab exact width unchanged", "a\tb", 5, "a\tb"},
 		{"only first line tabs expand", "a\tb\nc\td", 8, "   a   b\nc\td"},
