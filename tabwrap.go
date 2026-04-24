@@ -387,13 +387,18 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 // first line are expanded first so the added spaces do not shift later tab
 // stops there.
 func (c *Condition) FillLeft(s string, width int) string {
-	if c.StringWidth(s) >= width {
+	sw := c.StringWidth(s)
+	if sw >= width {
 		return s
 	}
 	first, rest, found := strings.Cut(s, "\n")
-	firstWidth := c.StringWidth(first)
+	var firstWidth int
 	if strings.Contains(first, "\t") {
 		first, firstWidth = c.expandTabLineAndWidth(first, c.options())
+	} else if !found {
+		firstWidth = sw
+	} else {
+		firstWidth = c.StringWidth(first)
 	}
 	pad := width - firstWidth
 	var b strings.Builder
