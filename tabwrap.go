@@ -145,6 +145,28 @@ func (c *Condition) expandTabFunc(s string, opts displaywidth.Options, fn func(n
 	return b.String()
 }
 
+func (c *Condition) expandTabLineAndWidth(s string, opts displaywidth.Options) (string, int) {
+	tw := c.tabWidth()
+
+	var b strings.Builder
+	b.Grow(len(s))
+	col := 0
+	gs := opts.StringGraphemes(s)
+	for gs.Next() {
+		v := gs.Value()
+		switch v {
+		case "\t":
+			nSpaces := tw - col%tw
+			b.WriteString(strings.Repeat(" ", nSpaces))
+			col += nSpaces
+		default:
+			b.WriteString(v)
+			col += gs.Width()
+		}
+	}
+	return b.String(), col
+}
+
 // Wrap wraps s to fit within width display columns.
 //
 // Tabs are indivisible tokens: if a tab does not fit on the current line the
@@ -369,12 +391,17 @@ func (c *Condition) FillLeft(s string, width int) string {
 		return s
 	}
 	first, rest, found := strings.Cut(s, "\n")
+	firstWidth := c.StringWidth(first)
 	if strings.Contains(first, "\t") {
-		first = c.ExpandTab(first)
+		first, firstWidth = c.expandTabLineAndWidth(first, c.options())
 	}
-	pad := width - c.StringWidth(first)
+	pad := width - firstWidth
 	var b strings.Builder
-	b.Grow(len(s) + pad)
+	totalLen := len(first) + pad
+	if found {
+		totalLen += 1 + len(rest)
+	}
+	b.Grow(totalLen)
 	b.WriteString(strings.Repeat(" ", pad))
 	b.WriteString(first)
 	if found {
