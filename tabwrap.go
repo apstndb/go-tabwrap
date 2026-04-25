@@ -154,7 +154,7 @@ func (c *Condition) expandTabSpacesWithOptions(s string, opts displaywidth.Optio
 	})
 }
 
-func (c *Condition) expandTabLineAndWidth(s string, opts displaywidth.Options) (string, int) {
+func (c *Condition) expandTabFirstLineAndWidth(s string, opts displaywidth.Options) (string, int) {
 	tw := c.tabWidth()
 
 	var b strings.Builder
@@ -400,7 +400,7 @@ func (c *Condition) FillLeft(s string, width int) string {
 	first, rest, found := strings.Cut(s, "\n")
 	var firstWidth int
 	if strings.Contains(first, "\t") {
-		first, firstWidth = c.expandTabLineAndWidth(first, opts)
+		first, firstWidth = c.expandTabFirstLineAndWidth(first, opts)
 	} else if !found {
 		firstWidth = sw
 	} else {
