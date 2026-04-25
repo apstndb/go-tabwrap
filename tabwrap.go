@@ -67,14 +67,7 @@ func (c *Condition) options() displaywidth.Options {
 	}
 }
 
-// StringWidth returns the display width of s in terminal columns.
-//
-// Width is measured by grapheme cluster, not rune. Tabs expand to tab stops,
-// newlines reset the column, and for multi-line strings the result is the
-// width of the widest line. EastAsianWidth, ControlSequences, and
-// ControlSequences8Bit affect how individual graphemes are counted.
-func (c *Condition) StringWidth(s string) int {
-	opts := c.options()
+func (c *Condition) stringWidth(s string, opts displaywidth.Options) int {
 	tw := c.tabWidth()
 
 	maxW := 0
@@ -100,6 +93,16 @@ func (c *Condition) StringWidth(s string) int {
 	return maxW
 }
 
+// StringWidth returns the display width of s in terminal columns.
+//
+// Width is measured by grapheme cluster, not rune. Tabs expand to tab stops,
+// newlines reset the column, and for multi-line strings the result is the
+// width of the widest line. EastAsianWidth, ControlSequences, and
+// ControlSequences8Bit affect how individual graphemes are counted.
+func (c *Condition) StringWidth(s string) int {
+	return c.stringWidth(s, c.options())
+}
+
 // ExpandTab replaces every tab with spaces according to tab stops.
 // Columns reset at each newline.
 func (c *Condition) ExpandTab(s string) string {
@@ -121,16 +124,25 @@ func (c *Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string 
 }
 
 func (c *Condition) expandTabFunc(s string, opts displaywidth.Options, fn func(nSpaces int) string) string {
+	expanded, _ := c.expandTabFuncAndWidth(s, opts, fn)
+	return expanded
+}
+
+func (c *Condition) expandTabFuncAndWidth(s string, opts displaywidth.Options, fn func(nSpaces int) string) (string, int) {
 	tw := c.tabWidth()
 
 	var b strings.Builder
 	b.Grow(len(s))
 	col := 0
+	maxW := 0
 	gs := opts.StringGraphemes(s)
 	for gs.Next() {
 		v := gs.Value()
 		switch v {
 		case "\n":
+			if col > maxW {
+				maxW = col
+			}
 			b.WriteByte('\n')
 			col = 0
 		case "\t":
@@ -142,7 +154,21 @@ func (c *Condition) expandTabFunc(s string, opts displaywidth.Options, fn func(n
 			col += gs.Width()
 		}
 	}
-	return b.String()
+	if col > maxW {
+		maxW = col
+	}
+	return b.String(), maxW
+}
+
+func (c *Condition) expandTabSpacesWithOptions(s string, opts displaywidth.Options) string {
+	expanded, _ := c.expandTabSpacesWithOptionsAndWidth(s, opts)
+	return expanded
+}
+
+func (c *Condition) expandTabSpacesWithOptionsAndWidth(s string, opts displaywidth.Options) (string, int) {
+	return c.expandTabFuncAndWidth(s, opts, func(nSpaces int) string {
+		return strings.Repeat(" ", nSpaces)
+	})
 }
 
 // Wrap wraps s to fit within width display columns.
@@ -324,8 +350,10 @@ func isSGRReset(s string) bool {
 	return s == "\x1b[0m" || s == "\x1b[m" || s == "\x9b0m" || s == "\x9bm"
 }
 
-// Truncate truncates s to fit within maxWidth display columns, appending tail
-// if truncation occurs. Tabs are expanded before measuring.
+// Truncate truncates s to fit within positive maxWidth display columns,
+// appending tail if truncation occurs. Tabs are expanded before measuring. If
+// tail itself is too wide to fit, it is truncated first so the result still
+// fits maxWidth. When maxWidth <= 0, tail is returned as-is.
 //
 // ControlSequences8Bit follows displaywidth and is ignored here, even when it
 // is enabled for StringWidth and Wrap. This can make 8-bit C1 sequences count
@@ -338,28 +366,55 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 
 	opts := c.options()
 	opts.ControlSequences8Bit = false
+	if strings.Contains(tail, "\t") {
+		tail = c.expandTabSpacesWithOptions(tail, opts)
+	}
+	tail = opts.TruncateString(tail, maxWidth, "")
 
 	if !strings.Contains(s, "\t") {
 		return opts.TruncateString(s, maxWidth, tail)
 	}
 
-	expanded := c.expandTabFunc(s, opts, func(nSpaces int) string {
-		return strings.Repeat(" ", nSpaces)
-	})
+	expanded := c.expandTabSpacesWithOptions(s, opts)
 	return opts.TruncateString(expanded, maxWidth, tail)
 }
 
 // FillLeft pads s on the left with spaces to reach width display columns.
-// For multi-line strings, padding is computed from the widest line but is
-// added only at the start of the full string, so only the first line changes.
-// Width is measured using the same rules as [Condition.StringWidth].
-// If s is already at least width columns wide it is returned unchanged.
+// For multi-line strings, padding is added only at the start of the full
+// string, so only the first line changes. If another line is already at least
+// width columns wide, s is returned unchanged. Width is measured using the same
+// rules as [Condition.StringWidth]. When left padding is needed, tabs in the
+// first line are expanded first so the added spaces do not shift later tab
+// stops there.
 func (c *Condition) FillLeft(s string, width int) string {
-	w := c.StringWidth(s)
-	if w >= width {
+	opts := c.options()
+	sw := c.stringWidth(s, opts)
+	if sw >= width {
 		return s
 	}
-	return strings.Repeat(" ", width-w) + s
+	first, rest, found := strings.Cut(s, "\n")
+	var firstWidth int
+	if strings.Contains(first, "\t") {
+		first, firstWidth = c.expandTabSpacesWithOptionsAndWidth(first, opts)
+	} else if !found {
+		firstWidth = sw
+	} else {
+		firstWidth = c.stringWidth(first, opts)
+	}
+	pad := width - firstWidth
+	var b strings.Builder
+	totalLen := len(first) + pad
+	if found {
+		totalLen += 1 + len(rest)
+	}
+	b.Grow(totalLen)
+	b.WriteString(strings.Repeat(" ", pad))
+	b.WriteString(first)
+	if found {
+		b.WriteByte('\n')
+		b.WriteString(rest)
+	}
+	return b.String()
 }
 
 // FillRight pads s on the right with spaces to reach width display columns.
