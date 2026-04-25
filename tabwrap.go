@@ -67,14 +67,7 @@ func (c *Condition) options() displaywidth.Options {
 	}
 }
 
-// StringWidth returns the display width of s in terminal columns.
-//
-// Width is measured by grapheme cluster, not rune. Tabs expand to tab stops,
-// newlines reset the column, and for multi-line strings the result is the
-// width of the widest line. EastAsianWidth, ControlSequences, and
-// ControlSequences8Bit affect how individual graphemes are counted.
-func (c *Condition) StringWidth(s string) int {
-	opts := c.options()
+func (c *Condition) stringWidth(s string, opts displaywidth.Options) int {
 	tw := c.tabWidth()
 
 	maxW := 0
@@ -98,6 +91,16 @@ func (c *Condition) StringWidth(s string) int {
 		maxW = col
 	}
 	return maxW
+}
+
+// StringWidth returns the display width of s in terminal columns.
+//
+// Width is measured by grapheme cluster, not rune. Tabs expand to tab stops,
+// newlines reset the column, and for multi-line strings the result is the
+// width of the widest line. EastAsianWidth, ControlSequences, and
+// ControlSequences8Bit affect how individual graphemes are counted.
+func (c *Condition) StringWidth(s string) int {
+	return c.stringWidth(s, c.options())
 }
 
 // ExpandTab replaces every tab with spaces according to tab stops.
@@ -143,6 +146,12 @@ func (c *Condition) expandTabFunc(s string, opts displaywidth.Options, fn func(n
 		}
 	}
 	return b.String()
+}
+
+func (c *Condition) expandTabSpacesWithOptions(s string, opts displaywidth.Options) string {
+	return c.expandTabFunc(s, opts, func(nSpaces int) string {
+		return strings.Repeat(" ", nSpaces)
+	})
 }
 
 func (c *Condition) expandTabLineAndWidth(s string, opts displaywidth.Options) (string, int) {
@@ -363,9 +372,7 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 	opts := c.options()
 	opts.ControlSequences8Bit = false
 	if strings.Contains(tail, "\t") {
-		tail = c.expandTabFunc(tail, opts, func(nSpaces int) string {
-			return strings.Repeat(" ", nSpaces)
-		})
+		tail = c.expandTabSpacesWithOptions(tail, opts)
 	}
 	tail = opts.TruncateString(tail, maxWidth, "")
 
@@ -373,9 +380,7 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 		return opts.TruncateString(s, maxWidth, tail)
 	}
 
-	expanded := c.expandTabFunc(s, opts, func(nSpaces int) string {
-		return strings.Repeat(" ", nSpaces)
-	})
+	expanded := c.expandTabSpacesWithOptions(s, opts)
 	return opts.TruncateString(expanded, maxWidth, tail)
 }
 
@@ -387,18 +392,19 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 // first line are expanded first so the added spaces do not shift later tab
 // stops there.
 func (c *Condition) FillLeft(s string, width int) string {
-	sw := c.StringWidth(s)
+	opts := c.options()
+	sw := c.stringWidth(s, opts)
 	if sw >= width {
 		return s
 	}
 	first, rest, found := strings.Cut(s, "\n")
 	var firstWidth int
 	if strings.Contains(first, "\t") {
-		first, firstWidth = c.expandTabLineAndWidth(first, c.options())
+		first, firstWidth = c.expandTabLineAndWidth(first, opts)
 	} else if !found {
 		firstWidth = sw
 	} else {
-		firstWidth = c.StringWidth(first)
+		firstWidth = c.stringWidth(first, opts)
 	}
 	pad := width - firstWidth
 	var b strings.Builder
