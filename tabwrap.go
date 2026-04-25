@@ -154,6 +154,8 @@ func (c *Condition) expandTabSpacesWithOptions(s string, opts displaywidth.Optio
 	})
 }
 
+// expandTabFirstLineAndWidth assumes s is a single line.
+// FillLeft splits at the first newline before calling it.
 func (c *Condition) expandTabFirstLineAndWidth(s string, opts displaywidth.Options) (string, int) {
 	tw := c.tabWidth()
 
