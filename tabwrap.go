@@ -124,16 +124,25 @@ func (c *Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string 
 }
 
 func (c *Condition) expandTabFunc(s string, opts displaywidth.Options, fn func(nSpaces int) string) string {
+	expanded, _ := c.expandTabFuncAndWidth(s, opts, fn)
+	return expanded
+}
+
+func (c *Condition) expandTabFuncAndWidth(s string, opts displaywidth.Options, fn func(nSpaces int) string) (string, int) {
 	tw := c.tabWidth()
 
 	var b strings.Builder
 	b.Grow(len(s))
 	col := 0
+	maxW := 0
 	gs := opts.StringGraphemes(s)
 	for gs.Next() {
 		v := gs.Value()
 		switch v {
 		case "\n":
+			if col > maxW {
+				maxW = col
+			}
 			b.WriteByte('\n')
 			col = 0
 		case "\t":
@@ -145,37 +154,21 @@ func (c *Condition) expandTabFunc(s string, opts displaywidth.Options, fn func(n
 			col += gs.Width()
 		}
 	}
-	return b.String()
+	if col > maxW {
+		maxW = col
+	}
+	return b.String(), maxW
 }
 
 func (c *Condition) expandTabSpacesWithOptions(s string, opts displaywidth.Options) string {
-	return c.expandTabFunc(s, opts, func(nSpaces int) string {
-		return strings.Repeat(" ", nSpaces)
-	})
+	expanded, _ := c.expandTabSpacesWithOptionsAndWidth(s, opts)
+	return expanded
 }
 
-// expandTabFirstLineAndWidth assumes s is a single line.
-// FillLeft splits at the first newline before calling it.
-func (c *Condition) expandTabFirstLineAndWidth(s string, opts displaywidth.Options) (string, int) {
-	tw := c.tabWidth()
-
-	var b strings.Builder
-	b.Grow(len(s))
-	col := 0
-	gs := opts.StringGraphemes(s)
-	for gs.Next() {
-		v := gs.Value()
-		switch v {
-		case "\t":
-			nSpaces := tw - col%tw
-			b.WriteString(strings.Repeat(" ", nSpaces))
-			col += nSpaces
-		default:
-			b.WriteString(v)
-			col += gs.Width()
-		}
-	}
-	return b.String(), col
+func (c *Condition) expandTabSpacesWithOptionsAndWidth(s string, opts displaywidth.Options) (string, int) {
+	return c.expandTabFuncAndWidth(s, opts, func(nSpaces int) string {
+		return strings.Repeat(" ", nSpaces)
+	})
 }
 
 // Wrap wraps s to fit within width display columns.
@@ -402,7 +395,7 @@ func (c *Condition) FillLeft(s string, width int) string {
 	first, rest, found := strings.Cut(s, "\n")
 	var firstWidth int
 	if strings.Contains(first, "\t") {
-		first, firstWidth = c.expandTabFirstLineAndWidth(first, opts)
+		first, firstWidth = c.expandTabSpacesWithOptionsAndWidth(first, opts)
 	} else if !found {
 		firstWidth = sw
 	} else {
