@@ -52,6 +52,20 @@ func NewCondition() *Condition {
 	return &Condition{TabWidth: 4}
 }
 
+// Clone returns an independent copy of c with defaults normalized.
+//
+// If c is nil, Clone returns [NewCondition]().
+func (c *Condition) Clone() *Condition {
+	if c == nil {
+		return NewCondition()
+	}
+	clone := *c
+	if clone.TabWidth <= 0 {
+		clone.TabWidth = 4
+	}
+	return &clone
+}
+
 func (c *Condition) tabWidth() int {
 	if c.TabWidth <= 0 {
 		return 4
@@ -75,12 +89,15 @@ func (c *Condition) stringWidth(s string, opts displaywidth.Options) int {
 	gs := opts.StringGraphemes(s)
 	for gs.Next() {
 		v := gs.Value()
-		switch v {
-		case "\n":
+		if isLineBreak(v) {
 			if col > maxW {
 				maxW = col
 			}
 			col = 0
+			continue
+		}
+
+		switch v {
 		case "\t":
 			col += tw - col%tw
 		default:
@@ -96,15 +113,15 @@ func (c *Condition) stringWidth(s string, opts displaywidth.Options) int {
 // StringWidth returns the display width of s in terminal columns.
 //
 // Width is measured by grapheme cluster, not rune. Tabs expand to tab stops,
-// newlines reset the column, and for multi-line strings the result is the
-// width of the widest line. EastAsianWidth, ControlSequences, and
+// LF, CRLF, and CR line breaks reset the column, and for multi-line strings
+// the result is the width of the widest line. EastAsianWidth, ControlSequences, and
 // ControlSequences8Bit affect how individual graphemes are counted.
 func (c *Condition) StringWidth(s string) int {
 	return c.stringWidth(s, c.options())
 }
 
 // ExpandTab replaces every tab with spaces according to tab stops.
-// Columns reset at each newline.
+// Columns reset at each line break.
 func (c *Condition) ExpandTab(s string) string {
 	return c.expandTabFunc(s, c.options(), func(nSpaces int) string {
 		return strings.Repeat(" ", nSpaces)
@@ -115,7 +132,7 @@ func (c *Condition) ExpandTab(s string) string {
 // the tab would normally expand to (based on the current column and tab width).
 // The column advances by nSpaces regardless of what fn returns, so the caller
 // is responsible for returning a string whose display width equals nSpaces if
-// alignment matters. Columns reset at each newline.
+// alignment matters. Columns reset at each line break.
 //
 // ExpandTabFunc panics if fn is nil and s contains a tab, because fn is only
 // called when a tab is encountered.
@@ -138,13 +155,16 @@ func (c *Condition) expandTabFuncAndWidth(s string, opts displaywidth.Options, f
 	gs := opts.StringGraphemes(s)
 	for gs.Next() {
 		v := gs.Value()
-		switch v {
-		case "\n":
+		if isLineBreak(v) {
 			if col > maxW {
 				maxW = col
 			}
-			b.WriteByte('\n')
+			b.WriteString(v)
 			col = 0
+			continue
+		}
+
+		switch v {
 		case "\t":
 			nSpaces := tw - col%tw
 			b.WriteString(fn(nSpaces))
@@ -177,7 +197,7 @@ func (c *Condition) expandTabSpacesWithOptionsAndWidth(s string, opts displaywid
 // entire tab moves to the next line. Tabs in the output are expanded to
 // spaces so the result is render-ready.
 //
-// Existing newlines are preserved. When width <= 0 the string is returned
+// Existing line breaks are preserved. When width <= 0 the string is returned
 // with tabs expanded but no wrapping applied.
 //
 // When control-sequence handling is enabled, Wrap carries across line breaks
@@ -209,13 +229,13 @@ func (c *Condition) Wrap(s string, width int) string {
 	col := 0
 	var sgrState []string
 
-	// emitNewline writes a line break. When SGR tracking is active, it emits
-	// a reset before the newline and replays the current SGR state after it.
-	emitNewline := func() {
+	// emitLineBreak writes a line break. When SGR tracking is active, it emits
+	// a reset before the line break and replays the current SGR state after it.
+	emitLineBreak := func(lineBreak string) {
 		if trackSGR && len(sgrState) > 0 {
 			b.WriteString(resetSGR)
 		}
-		b.WriteByte('\n')
+		b.WriteString(lineBreak)
 		if trackSGR {
 			for _, seq := range sgrState {
 				b.WriteString(seq)
@@ -232,9 +252,10 @@ func (c *Condition) Wrap(s string, width int) string {
 		// or, when ControlSequences8Bit is enabled, with the 8-bit CSI byte 0x9b).
 		if trackSGR && w == 0 && len(v) > 0 && (v[0] == '\x1b' || v[0] == '\x9b') {
 			if isSGR(v) {
-				if isSGRReset(v) {
+				if sgrStartsWithReset(v) {
 					sgrState = sgrState[:0]
-				} else {
+				}
+				if !isSGRReset(v) {
 					sgrState = append(sgrState, v)
 				}
 			}
@@ -242,14 +263,17 @@ func (c *Condition) Wrap(s string, width int) string {
 			continue
 		}
 
-		switch v {
-		case "\n":
-			emitNewline()
+		if isLineBreak(v) {
+			emitLineBreak(v)
 			col = 0
+			continue
+		}
+
+		switch v {
 		case "\t":
 			spaces := tw - col%tw
 			if col+spaces > width && col > 0 {
-				emitNewline()
+				emitLineBreak("\n")
 				col = 0
 				spaces = tw
 			}
@@ -259,7 +283,7 @@ func (c *Condition) Wrap(s string, width int) string {
 			col += spaces
 		default:
 			if col+w > width && col > 0 {
-				emitNewline()
+				emitLineBreak("\n")
 				col = 0
 			}
 			b.WriteString(v)
@@ -277,18 +301,14 @@ func trimWrappedLinesRight(s string, opts displaywidth.Options) string {
 	var b strings.Builder
 	b.Grow(len(s))
 
-	start := 0
 	for {
-		idx := strings.IndexByte(s[start:], '\n')
-		if idx == -1 {
-			b.WriteString(trimTrailingLineSpace(s[start:], opts))
+		line, lineBreak, rest := cutLineBreak(s)
+		b.WriteString(trimTrailingLineSpace(line, opts))
+		if lineBreak == "" {
 			return b.String()
 		}
-
-		end := start + idx
-		b.WriteString(trimTrailingLineSpace(s[start:end], opts))
-		b.WriteByte('\n')
-		start = end + 1
+		b.WriteString(lineBreak)
+		s = rest
 	}
 }
 
@@ -328,55 +348,199 @@ func trimTrailingLineSpace(s string, opts displaywidth.Options) string {
 	return b.String()
 }
 
+func isLineBreak(s string) bool {
+	return s == "\n" || s == "\r" || s == "\r\n"
+}
+
+func cutLineBreak(s string) (line string, lineBreak string, rest string) {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\n':
+			return s[:i], s[i : i+1], s[i+1:]
+		case '\r':
+			if i+1 < len(s) && s[i+1] == '\n' {
+				return s[:i], s[i : i+2], s[i+2:]
+			}
+			return s[:i], s[i : i+1], s[i+1:]
+		}
+	}
+	return s, "", ""
+}
+
+func containsLineBreak(s string) bool {
+	return strings.ContainsAny(s, "\r\n")
+}
+
 // isSGR reports whether s is a CSI SGR (Select Graphic Rendition) sequence.
 // It recognises both 7-bit (ESC [ <params> m) and 8-bit (0x9b <params> m) forms.
 func isSGR(s string) bool {
-	if len(s) < 2 || s[len(s)-1] != 'm' {
+	params, ok := sgrParams(s)
+	if !ok {
 		return false
 	}
+	return !hasPrivateCSIParameter(params)
+}
+
+func sgrParams(s string) (string, bool) {
+	if len(s) < 2 || s[len(s)-1] != 'm' {
+		return "", false
+	}
+
 	// 7-bit: ESC [ ... m
 	if len(s) >= 3 && s[0] == '\x1b' && s[1] == '[' {
-		return true
+		return s[2 : len(s)-1], true
 	}
 	// 8-bit: 0x9b ... m
 	if s[0] == '\x9b' {
-		return true
+		return s[1 : len(s)-1], true
 	}
-	return false
+	return "", false
+}
+
+func hasPrivateCSIParameter(params string) bool {
+	if params == "" {
+		return false
+	}
+	switch params[0] {
+	case '<', '=', '>', '?':
+		return true
+	default:
+		return false
+	}
 }
 
 // isSGRReset reports whether s is an SGR reset sequence.
 func isSGRReset(s string) bool {
-	return s == "\x1b[0m" || s == "\x1b[m" || s == "\x9b0m" || s == "\x9bm"
+	params, ok := sgrParams(s)
+	return ok && !hasPrivateCSIParameter(params) && allSGRParamsReset(params)
+}
+
+func sgrStartsWithReset(s string) bool {
+	params, ok := sgrParams(s)
+	if !ok || hasPrivateCSIParameter(params) {
+		return false
+	}
+	first, _, _ := strings.Cut(params, ";")
+	return isZeroSGRParam(first)
+}
+
+func allSGRParamsReset(params string) bool {
+	for {
+		param, rest, found := strings.Cut(params, ";")
+		if !isZeroSGRParam(param) {
+			return false
+		}
+		if !found {
+			return true
+		}
+		params = rest
+	}
+}
+
+func isZeroSGRParam(param string) bool {
+	for i := 0; i < len(param); i++ {
+		if param[i] != '0' {
+			return false
+		}
+	}
+	return true
+}
+
+// TruncateResult describes the outcome of a truncation operation.
+type TruncateResult struct {
+	// Text is the truncation result.
+	Text string
+	// Width is the display width of Text using Truncate's width model.
+	Width int
+	// Truncated reports whether any input line was shortened or replaced.
+	Truncated bool
 }
 
 // Truncate truncates s to fit within positive maxWidth display columns,
 // appending tail if truncation occurs. Tabs are expanded before measuring. If
 // tail itself is too wide to fit, it is truncated first so the result still
-// fits maxWidth. When maxWidth <= 0, tail is returned as-is.
+// fits maxWidth. Tabs in tail are expanded independently before fitting, not
+// relative to the column where tail is appended. When maxWidth <= 0, tail is
+// returned as-is.
 //
 // ControlSequences8Bit follows displaywidth and is ignored here, even when it
 // is enabled for StringWidth and Wrap. This can make 8-bit C1 sequences count
 // as zero-width for measurement but not for truncation; go-tabwrap keeps that
 // behavior to avoid mis-parsing UTF-8 byte sequences as standalone C1 controls.
 func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
-	if maxWidth <= 0 {
-		return tail
-	}
+	return c.TruncateInfo(s, maxWidth, tail).Text
+}
 
+// TruncateInfo truncates s like [Condition.Truncate] and also returns the
+// resulting display width and whether truncation occurred.
+//
+// Multi-line input is truncated line by line so the reported width follows the
+// package width model: the widest output line determines Width.
+func (c *Condition) TruncateInfo(s string, maxWidth int, tail string) TruncateResult {
 	opts := c.options()
 	opts.ControlSequences8Bit = false
+
+	if maxWidth <= 0 {
+		return c.truncateLineInfo(s, maxWidth, tail, opts)
+	}
+
 	if strings.Contains(tail, "\t") {
 		tail = c.expandTabSpacesWithOptions(tail, opts)
 	}
 	tail = opts.TruncateString(tail, maxWidth, "")
 
-	if !strings.Contains(s, "\t") {
-		return opts.TruncateString(s, maxWidth, tail)
+	if !containsLineBreak(s) {
+		return c.truncateLineInfo(s, maxWidth, tail, opts)
 	}
 
-	expanded := c.expandTabSpacesWithOptions(s, opts)
-	return opts.TruncateString(expanded, maxWidth, tail)
+	var b strings.Builder
+	b.Grow(len(s))
+	result := TruncateResult{}
+	for {
+		line, lineBreak, rest := cutLineBreak(s)
+		lineResult := c.truncateLineInfo(line, maxWidth, tail, opts)
+		b.WriteString(lineResult.Text)
+		if lineResult.Width > result.Width {
+			result.Width = lineResult.Width
+		}
+		result.Truncated = result.Truncated || lineResult.Truncated
+		if lineBreak == "" {
+			break
+		}
+		b.WriteString(lineBreak)
+		s = rest
+	}
+	result.Text = b.String()
+	return result
+}
+
+func (c *Condition) truncateLineInfo(s string, maxWidth int, tail string, opts displaywidth.Options) TruncateResult {
+	if maxWidth <= 0 {
+		return TruncateResult{
+			Text:      tail,
+			Width:     c.stringWidth(tail, opts),
+			Truncated: s != tail,
+		}
+	}
+
+	expanded := s
+	width := c.stringWidth(expanded, opts)
+	if strings.Contains(s, "\t") {
+		expanded, width = c.expandTabSpacesWithOptionsAndWidth(s, opts)
+	}
+	if width <= maxWidth {
+		return TruncateResult{
+			Text:  expanded,
+			Width: width,
+		}
+	}
+
+	text := opts.TruncateString(expanded, maxWidth, tail)
+	return TruncateResult{
+		Text:      text,
+		Width:     c.stringWidth(text, opts),
+		Truncated: true,
+	}
 }
 
 // FillLeft pads s on the left with spaces to reach width display columns.
@@ -460,6 +624,11 @@ func Wrap(s string, width int) string {
 // Truncate truncates s using default settings.
 func Truncate(s string, maxWidth int, tail string) string {
 	return defaultCondition.Truncate(s, maxWidth, tail)
+}
+
+// TruncateInfo truncates s using default settings and returns width metadata.
+func TruncateInfo(s string, maxWidth int, tail string) TruncateResult {
+	return defaultCondition.TruncateInfo(s, maxWidth, tail)
 }
 
 // FillLeft pads s on the left using default settings.

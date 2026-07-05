@@ -104,3 +104,10 @@ func BenchmarkFillRight(b *testing.B) {
 		sinkString = c.FillRight("hello", 20)
 	}
 }
+
+func BenchmarkFillLeft(b *testing.B) {
+	c := NewCondition()
+	for range b.N {
+		sinkString = c.FillLeft("hello", 20)
+	}
+}
