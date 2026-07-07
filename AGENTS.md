@@ -4,25 +4,25 @@
 
 `github.com/apstndb/go-tabwrap` is a small, dependency-light Go library providing
 tab-aware, grapheme-cluster-aware display width operations for terminal output:
-`StringWidth`, `ExpandTab`, `ExpandTabFunc`, `Wrap`, `Truncate`, `FillLeft`,
-`FillRight`, all available as package-level functions (default settings) and as
-methods on `Condition`. It wraps `github.com/clipperhouse/displaywidth` (grapheme
-iteration and per-grapheme width) and adds tab-stop expansion, wrapping,
-truncation, and padding on top.
+`StringWidth`, `ExpandTab`, `ExpandTabFunc`, `Wrap`, `Truncate`,
+`TruncateInfo`, `FillLeft`, `FillRight`, all available as package-level
+functions (default settings) and as methods on `Condition`. It wraps
+`github.com/clipperhouse/displaywidth` (grapheme iteration and per-grapheme
+width) and adds tab-stop expansion, wrapping, truncation, and padding on top.
 
 ## Width model (invariants to preserve)
 
 - Width is measured in terminal display columns per grapheme cluster (UAX #29),
   never per rune.
 - Tabs expand to the next tab stop (`TabWidth`, default 4; `<= 0` falls back to 4).
-- Newlines reset the column; the width of a multi-line string is the width of its
-  widest line.
+- LF, CRLF, and CR line breaks reset the column; the width of a multi-line string
+  is the width of its widest line.
 - `EastAsianWidth`, `ControlSequences` (7-bit), and `ControlSequences8Bit` follow
   `displaywidth.Options` semantics. Exception: `Truncate` deliberately forces
   `ControlSequences8Bit = false` (parsing raw C1 bytes during truncation can break
   UTF-8 boundaries — documented in godoc and README).
 - `Wrap` treats tabs as indivisible tokens and carries SGR state across line
-  breaks (reset before newline, replay after).
+  breaks (reset before the line break, replay after).
 
 ## Layout
 

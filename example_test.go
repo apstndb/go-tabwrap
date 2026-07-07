@@ -33,6 +33,17 @@ func ExampleTruncate() {
 	// 日本...
 }
 
+func ExampleTruncateInfo() {
+	result := tabwrap.TruncateInfo("hello world", 8, "...")
+	fmt.Println(result.Text)
+	fmt.Println(result.Width)
+	fmt.Println(result.Truncated)
+	// Output:
+	// hello...
+	// 8
+	// true
+}
+
 func ExampleFillLeft() {
 	fmt.Printf("%q\n", tabwrap.FillLeft("42", 5))
 	// Output: "   42"

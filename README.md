@@ -6,9 +6,9 @@ Tab-aware, grapheme-cluster-aware display width utilities for Go terminal
 output.
 
 It provides `StringWidth`, `ExpandTab`, `ExpandTabFunc`, `Wrap`, `Truncate`,
-`FillLeft`, and `FillRight` for CLI tables, tree renderers, and other
-fixed-width terminal layouts. Full behavior notes and runnable examples live on
-[pkg.go.dev](https://pkg.go.dev/github.com/apstndb/go-tabwrap).
+`TruncateInfo`, `FillLeft`, and `FillRight` for CLI tables, tree renderers, and
+other fixed-width terminal layouts. Full behavior notes and runnable examples
+live on [pkg.go.dev](https://pkg.go.dev/github.com/apstndb/go-tabwrap).
 
 ## Install
 
@@ -40,8 +40,10 @@ func main() {
 ```
 
 `Truncate` is a fitting helper and intentionally ignores
-`Condition.ControlSequences8Bit`; see the package documentation for that
-compatibility note and the full width model.
+`Condition.ControlSequences8Bit`; `TruncateInfo` also reports the fitted width
+and whether truncation occurred. See the package documentation for that
+compatibility note and the full width model, including LF/CRLF/CR line-break
+handling.
 
 ## Acknowledgements
 
