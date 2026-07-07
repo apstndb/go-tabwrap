@@ -3,6 +3,7 @@ package tabwrap
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/clipperhouse/displaywidth"
 )
@@ -27,8 +28,12 @@ func TestStringWidth(t *testing.T) {
 		{"CJK", "日本語", 6},
 		{"mixed ascii CJK", "a日b", 4},
 		{"newline takes max", "abc\nabcdef", 6},
+		{"CRLF takes max", "abc\r\nabcdef", 6},
+		{"CR takes max", "abc\rabcdef", 6},
 		{"only tabs", "\t\t\t", 12},
 		{"tab with newline", "ab\t\ncd\t", 4},
+		{"tab with CRLF", "ab\t\r\ncd\t", 4},
+		{"tab with CR", "ab\t\rcd\t", 4},
 	}
 
 	for _, tt := range tests {
@@ -84,6 +89,8 @@ func TestExpandTab(t *testing.T) {
 		{"tab after 4", "abcd\t", "abcd    "},
 		{"two tabs", "\t\t", "        "},
 		{"with newline", "ab\t\ncd\t", "ab  \ncd  "},
+		{"with CRLF", "ab\t\r\ncd\t", "ab  \r\ncd  "},
+		{"with CR", "ab\t\rcd\t", "ab  \rcd  "},
 		{"empty", "", ""},
 	}
 
@@ -95,6 +102,29 @@ func TestExpandTab(t *testing.T) {
 				t.Errorf("ExpandTab(%q) = %q, want %q", tt.s, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestEastAsianWidth(t *testing.T) {
+	t.Parallel()
+
+	defaultCond := NewCondition()
+	eastAsian := &Condition{TabWidth: 4, EastAsianWidth: true}
+
+	if got := defaultCond.StringWidth("○"); got != 1 {
+		t.Errorf("default StringWidth(○) = %d, want 1", got)
+	}
+	if got := eastAsian.StringWidth("○"); got != 2 {
+		t.Errorf("EastAsianWidth StringWidth(○) = %d, want 2", got)
+	}
+	if got := defaultCond.Wrap("○○", 2); got != "○○" {
+		t.Errorf("default Wrap ambiguous width = %q, want %q", got, "○○")
+	}
+	if got := eastAsian.Wrap("○○", 2); got != "○\n○" {
+		t.Errorf("EastAsianWidth Wrap ambiguous width = %q, want %q", got, "○\n○")
+	}
+	if got := eastAsian.Truncate("○○", 3, "."); got != "○." {
+		t.Errorf("EastAsianWidth Truncate ambiguous width = %q, want %q", got, "○.")
 	}
 }
 
@@ -164,6 +194,17 @@ func TestExpandTabFunc(t *testing.T) {
 		}
 	})
 
+	t.Run("with CRLF and CR", func(t *testing.T) {
+		t.Parallel()
+		got := c.ExpandTabFunc("ab\t\r\ncd\t\ref\t", func(nSpaces int) string {
+			return "→" + strings.Repeat(" ", nSpaces-1)
+		})
+		want := "ab→ \r\ncd→ \ref→ "
+		if got != want {
+			t.Errorf("ExpandTabFunc = %q, want %q", got, want)
+		}
+	})
+
 	assertPanics := func(t *testing.T, name string, fn func()) {
 		t.Helper()
 		t.Run(name, func(t *testing.T) {
@@ -218,7 +259,11 @@ func TestWrap(t *testing.T) {
 		{"tab wraps to next line", "abcd\t", 4, "abcd\n    "},
 		{"CJK wrap", "日本語", 4, "日本\n語"},
 		{"newline preserved", "ab\ncd", 10, "ab\ncd"},
+		{"CRLF preserved", "ab\r\ncd", 10, "ab\r\ncd"},
+		{"CR preserved", "ab\rcd", 10, "ab\rcd"},
 		{"tab with newline wrap", "ab\t\ncd", 10, "ab  \ncd"},
+		{"tab with CRLF wrap", "ab\t\r\ncd", 10, "ab  \r\ncd"},
+		{"tab with CR wrap", "ab\t\rcd", 10, "ab  \rcd"},
 	}
 
 	for _, tt := range tests {
@@ -248,6 +293,8 @@ func TestWrapTrimTrailingSpace(t *testing.T) {
 			{"tab before wrap boundary", "ab\tcd", 4, "ab\ncd"},
 			{"tab at end of line", "abc\t", 4, "abc"},
 			{"natural newline", "ab\t\ncd\t", 10, "ab\ncd"},
+			{"natural CRLF", "ab\t\r\ncd\t", 10, "ab\r\ncd"},
+			{"natural CR", "ab\t\rcd\t", 10, "ab\rcd"},
 			{"width zero still trims", "abc\t", 0, "abc"},
 		}
 
@@ -307,6 +354,7 @@ func TestTruncate(t *testing.T) {
 		{"CJK truncate", "日本語テスト", 7, "...", "日本..."},
 		{"tab in string fits", "a\tb", 5, "...", "a   b"},
 		{"tab in string truncated", "a\tbc", 5, "...", "a ..."},
+		{"tail tab expands independently", "hello world", 8, "\tX", "hel    X"},
 		{"width zero", "hello", 0, "...", "..."},
 	}
 
@@ -319,6 +367,82 @@ func TestTruncate(t *testing.T) {
 			}
 			if tt.maxWidth > 0 && c.StringWidth(got) > tt.maxWidth {
 				t.Errorf("Truncate(%q, %d, %q) visible width = %d, want <= %d", tt.s, tt.maxWidth, tt.tail, c.StringWidth(got), tt.maxWidth)
+			}
+		})
+	}
+}
+
+func TestTruncateInfo(t *testing.T) {
+	t.Parallel()
+	c := NewCondition()
+
+	tests := []struct {
+		name string
+		s    string
+		max  int
+		tail string
+		want TruncateResult
+	}{
+		{
+			name: "single line no truncation expands tabs",
+			s:    "a\tb",
+			max:  5,
+			tail: "...",
+			want: TruncateResult{Text: "a   b", Width: 5, Truncated: false},
+		},
+		{
+			name: "single line truncation",
+			s:    "hello world",
+			max:  8,
+			tail: "...",
+			want: TruncateResult{Text: "hello...", Width: 8, Truncated: true},
+		},
+		{
+			name: "non-positive width preserves tail bytes",
+			s:    "hello",
+			max:  0,
+			tail: "\t",
+			want: TruncateResult{Text: "\t", Width: 4, Truncated: true},
+		},
+		{
+			name: "non-positive width returns one tail for multi-line input",
+			s:    "hello\nworld",
+			max:  0,
+			tail: "...",
+			want: TruncateResult{Text: "...", Width: 3, Truncated: true},
+		},
+		{
+			name: "multi-line widest line fits",
+			s:    "abc\ndef",
+			max:  3,
+			tail: "...",
+			want: TruncateResult{Text: "abc\ndef", Width: 3, Truncated: false},
+		},
+		{
+			name: "multi-line truncates each line independently",
+			s:    "abcdef\r\nefghij\rkl",
+			max:  5,
+			tail: "...",
+			want: TruncateResult{Text: "ab...\r\nef...\rkl", Width: 5, Truncated: true},
+		},
+		{
+			name: "multi-line expands tabs per line",
+			s:    "a\tb\nabcdef",
+			max:  5,
+			tail: ".",
+			want: TruncateResult{Text: "a   b\nabcd.", Width: 5, Truncated: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := c.TruncateInfo(tt.s, tt.max, tt.tail)
+			if got != tt.want {
+				t.Errorf("TruncateInfo(%q, %d, %q) = %+v, want %+v", tt.s, tt.max, tt.tail, got, tt.want)
+			}
+			if text := c.Truncate(tt.s, tt.max, tt.tail); text != got.Text {
+				t.Errorf("Truncate(%q, %d, %q) = %q, want TruncateInfo.Text %q", tt.s, tt.max, tt.tail, text, got.Text)
 			}
 		})
 	}
@@ -340,9 +464,12 @@ func TestFillLeft(t *testing.T) {
 		{"empty string", "", 3, "   "},
 		{"CJK", "日本", 6, "  日本"},
 		{"first line not widest", "a\nbc", 3, "  a\nbc"},
+		{"first line not widest with CRLF", "a\r\nbc", 3, "  a\r\nbc"},
+		{"first line not widest with CR", "a\rbc", 3, "  a\rbc"},
 		{"tab expands before left padding", "a\tb", 8, "   a   b"},
 		{"tab exact width unchanged", "a\tb", 5, "a\tb"},
 		{"only first line tabs expand", "a\tb\nc\td", 8, "   a   b\nc\td"},
+		{"only first line tabs expand with CR", "a\tb\rc\td", 8, "   a   b\rc\td"},
 	}
 
 	for _, tt := range tests {
@@ -356,6 +483,18 @@ func TestFillLeft(t *testing.T) {
 				t.Errorf("FillLeft(%q, %d) visible width = %d, want %d", tt.s, tt.width, c.StringWidth(got), max(c.StringWidth(tt.want), tt.width))
 			}
 		})
+	}
+}
+
+func TestFillMultiLineContracts(t *testing.T) {
+	t.Parallel()
+	c := NewCondition()
+
+	if got, want := c.FillLeft("a\nbc", 3), "  a\nbc"; got != want {
+		t.Errorf("FillLeft multi-line = %q, want %q", got, want)
+	}
+	if got, want := c.FillRight("a\nbc", 3), "a\nbc "; got != want {
+		t.Errorf("FillRight multi-line = %q, want %q", got, want)
 	}
 }
 
@@ -410,6 +549,9 @@ func TestPackageLevelFunctions(t *testing.T) {
 	if got := Truncate("hello", 1, "..."); got != "." {
 		t.Errorf("Truncate wide tail = %q, want %q", got, ".")
 	}
+	if got := TruncateInfo("hello world", 8, "..."); got != (TruncateResult{Text: "hello...", Width: 8, Truncated: true}) {
+		t.Errorf("TruncateInfo = %+v, want hello... width 8 truncated", got)
+	}
 	if got := FillLeft("hi", 5); got != "   hi" {
 		t.Errorf("FillLeft = %q, want %q", got, "   hi")
 	}
@@ -427,6 +569,49 @@ func TestConditionZeroTabWidth(t *testing.T) {
 	if got := c.StringWidth("\t"); got != 4 {
 		t.Errorf("zero TabWidth: StringWidth(tab) = %d, want 4", got)
 	}
+}
+
+func TestConditionClone(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil receiver returns defaults", func(t *testing.T) {
+		t.Parallel()
+		var c *Condition
+		got := c.Clone()
+		if got == nil {
+			t.Fatal("Clone() returned nil")
+		}
+		if got.TabWidth != 4 {
+			t.Errorf("Clone().TabWidth = %d, want 4", got.TabWidth)
+		}
+	})
+
+	t.Run("copies options and normalizes tab width", func(t *testing.T) {
+		t.Parallel()
+		c := &Condition{
+			TabWidth:             0,
+			EastAsianWidth:       true,
+			ControlSequences:     true,
+			ControlSequences8Bit: true,
+			TrimTrailingSpace:    true,
+		}
+
+		got := c.Clone()
+		if got == c {
+			t.Fatal("Clone() returned the original pointer")
+		}
+		if got.TabWidth != 4 {
+			t.Errorf("Clone().TabWidth = %d, want 4", got.TabWidth)
+		}
+		if !got.EastAsianWidth || !got.ControlSequences || !got.ControlSequences8Bit || !got.TrimTrailingSpace {
+			t.Errorf("Clone() did not preserve options: %+v", got)
+		}
+
+		got.TabWidth = 8
+		if c.TabWidth != 0 {
+			t.Errorf("mutating clone changed original TabWidth to %d, want 0", c.TabWidth)
+		}
+	})
 }
 
 func TestControlSequences(t *testing.T) {
@@ -656,10 +841,77 @@ func TestWrapSGRCarryOver(t *testing.T) {
 			want:  red + "ab" + reset + "\n" + red + "cd" + reset,
 		},
 		{
+			name:  "natural CRLF carries state",
+			s:     red + "ab\r\ncd" + reset,
+			width: 10,
+			want:  red + "ab" + reset + "\r\n" + red + "cd" + reset,
+		},
+		{
+			name:  "natural CR carries state",
+			s:     red + "ab\rcd" + reset,
+			width: 10,
+			want:  red + "ab" + reset + "\r" + red + "cd" + reset,
+		},
+		{
 			name:  "dim NULL wrap",
 			s:     dim + "NULL value here" + reset,
 			width: 10,
 			want:  dim + "NULL value" + reset + "\n" + dim + " here" + reset,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := c.Wrap(tt.s, tt.width)
+			if got != tt.want {
+				t.Errorf("Wrap(%q, %d):\n got  %q\n want %q", tt.s, tt.width, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWrapSGRTrackingTightening(t *testing.T) {
+	t.Parallel()
+	c := &Condition{TabWidth: 4, ControlSequences: true}
+
+	red := "\x1b[31m"
+	bold := "\x1b[1m"
+	reset := "\x1b[0m"
+	private := "\x1b[?25m"
+	resetRed := "\x1b[0;31m"
+	zeroResetRed := "\x1b[00;31m"
+	zeroReset := "\x1b[00m"
+
+	tests := []struct {
+		name  string
+		s     string
+		width int
+		want  string
+	}{
+		{
+			name:  "private CSI m is not carried",
+			s:     red + "ab" + private + "cdef" + reset,
+			width: 3,
+			want:  red + "ab" + private + "c" + reset + "\n" + red + "def" + reset,
+		},
+		{
+			name:  "leading reset composite drops previous state",
+			s:     bold + resetRed + "abcdef" + reset,
+			width: 3,
+			want:  bold + resetRed + "abc" + reset + "\n" + resetRed + "def" + reset,
+		},
+		{
+			name:  "all-zero leading reset composite drops previous state",
+			s:     bold + zeroResetRed + "abcdef" + reset,
+			width: 3,
+			want:  bold + zeroResetRed + "abc" + reset + "\n" + zeroResetRed + "def" + reset,
+		},
+		{
+			name:  "all-zero reset clears state",
+			s:     red + "ab" + zeroReset + "cdef",
+			width: 3,
+			want:  red + "ab" + zeroReset + "c\n" + "def",
 		},
 	}
 
@@ -715,4 +967,52 @@ func TestWrapSGRCarryOverLineIndependence(t *testing.T) {
 			t.Errorf("line %d visible width = %d, want <= 5", i, w)
 		}
 	}
+}
+
+func FuzzExpandTabPreservesWidth(f *testing.F) {
+	for _, seed := range []string{
+		"",
+		"a\tb",
+		"ab\t\r\ncd\t",
+		"日本\t語",
+		"e\u0301\tz",
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, s string) {
+		if !utf8.ValidString(s) {
+			t.Skip()
+		}
+		c := NewCondition()
+		if got, want := c.StringWidth(c.ExpandTab(s)), c.StringWidth(s); got != want {
+			t.Fatalf("StringWidth(ExpandTab(%q)) = %d, want %d", s, got, want)
+		}
+	})
+}
+
+func FuzzTruncateSingleLineWidth(f *testing.F) {
+	f.Add("hello world", "...", 8)
+	f.Add("a\tbc", "...", 5)
+	f.Add("日本語テスト", "...", 7)
+
+	f.Fuzz(func(t *testing.T, s, tail string, maxWidth int) {
+		if !utf8.ValidString(s) || !utf8.ValidString(tail) {
+			t.Skip()
+		}
+		if strings.ContainsAny(s, "\r\n") || strings.ContainsAny(tail, "\r\n") {
+			t.Skip()
+		}
+		maxWidth %= 40
+		if maxWidth < 0 {
+			maxWidth = -maxWidth
+		}
+		maxWidth++
+
+		c := NewCondition()
+		got := c.Truncate(s, maxWidth, tail)
+		if width := c.StringWidth(got); width > maxWidth {
+			t.Fatalf("StringWidth(Truncate(%q, %d, %q)) = %d, want <= %d; got %q", s, maxWidth, tail, width, maxWidth, got)
+		}
+	})
 }
