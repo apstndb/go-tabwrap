@@ -464,9 +464,12 @@ func TestFillLeft(t *testing.T) {
 		{"empty string", "", 3, "   "},
 		{"CJK", "日本", 6, "  日本"},
 		{"first line not widest", "a\nbc", 3, "  a\nbc"},
+		{"first line not widest with CRLF", "a\r\nbc", 3, "  a\r\nbc"},
+		{"first line not widest with CR", "a\rbc", 3, "  a\rbc"},
 		{"tab expands before left padding", "a\tb", 8, "   a   b"},
 		{"tab exact width unchanged", "a\tb", 5, "a\tb"},
 		{"only first line tabs expand", "a\tb\nc\td", 8, "   a   b\nc\td"},
+		{"only first line tabs expand with CR", "a\tb\rc\td", 8, "   a   b\rc\td"},
 	}
 
 	for _, tt := range tests {

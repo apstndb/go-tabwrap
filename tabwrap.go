@@ -556,11 +556,11 @@ func (c *Condition) FillLeft(s string, width int) string {
 	if sw >= width {
 		return s
 	}
-	first, rest, found := strings.Cut(s, "\n")
+	first, lineBreak, rest := cutLineBreak(s)
 	var firstWidth int
 	if strings.Contains(first, "\t") {
 		first, firstWidth = c.expandTabSpacesWithOptionsAndWidth(first, opts)
-	} else if !found {
+	} else if lineBreak == "" {
 		firstWidth = sw
 	} else {
 		firstWidth = c.stringWidth(first, opts)
@@ -568,14 +568,14 @@ func (c *Condition) FillLeft(s string, width int) string {
 	pad := width - firstWidth
 	var b strings.Builder
 	totalLen := len(first) + pad
-	if found {
-		totalLen += 1 + len(rest)
+	if lineBreak != "" {
+		totalLen += len(lineBreak) + len(rest)
 	}
 	b.Grow(totalLen)
 	b.WriteString(strings.Repeat(" ", pad))
 	b.WriteString(first)
-	if found {
-		b.WriteByte('\n')
+	if lineBreak != "" {
+		b.WriteString(lineBreak)
 		b.WriteString(rest)
 	}
 	return b.String()
