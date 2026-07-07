@@ -1,22 +1,3 @@
-// Package tabwrap provides tab-aware, grapheme-cluster-aware display width
-// operations for terminal/fixed-width output.
-//
-// It wraps [clipperhouse/displaywidth] to add tab-stop handling, line wrapping,
-// truncation, and padding — the common building blocks for CLI table renderers
-// and TUI applications.
-//
-// Width is measured in terminal display columns, by grapheme cluster rather
-// than rune. Tabs expand to tab stops, newlines reset the column, and the
-// width of a multi-line string is the width of its widest line. The handling
-// of East Asian ambiguous width and ECMA-48 control sequences follows the
-// active [Condition] options.
-//
-// Key differences from [mattn/go-runewidth]:
-//   - Grapheme-cluster-aware (emoji, combining characters) via displaywidth.
-//   - Built-in tab-stop expansion in every operation.
-//
-// Key additions over [clipperhouse/displaywidth]:
-//   - Tab-aware StringWidth, ExpandTab, Wrap, Truncate, FillLeft, FillRight.
 package tabwrap
 
 import (
