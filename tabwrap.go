@@ -236,19 +236,17 @@ func (c *Condition) Wrap(s string, width int) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	col := 0
-	var sgrState []string
+	var sgrState sgrStyleState
 
 	// emitLineBreak writes a line break. When SGR tracking is active, it emits
 	// a reset before the line break and replays the current SGR state after it.
 	emitLineBreak := func(lineBreak string) {
-		if trackSGR && len(sgrState) > 0 {
+		if trackSGR && sgrState.active() {
 			b.WriteString(resetSGR)
 		}
 		b.WriteString(lineBreak)
 		if trackSGR {
-			for _, seq := range sgrState {
-				b.WriteString(seq)
-			}
+			sgrState.writeTo(&b)
 		}
 	}
 
@@ -260,14 +258,7 @@ func (c *Condition) Wrap(s string, width int) string {
 		// Track SGR sequences (zero-width escape sequences starting with ESC
 		// or, when ControlSequences8Bit is enabled, with the 8-bit CSI byte 0x9b).
 		if trackSGR && w == 0 && len(v) > 0 && (v[0] == '\x1b' || v[0] == '\x9b') {
-			if isSGR(v) {
-				if sgrStartsWithReset(v) {
-					sgrState = sgrState[:0]
-				}
-				if !isSGRReset(v) {
-					sgrState = append(sgrState, v)
-				}
-			}
+			sgrState.apply(v)
 			b.WriteString(v)
 			continue
 		}
@@ -391,16 +382,6 @@ func containsLineBreak(s string) bool {
 	return strings.ContainsAny(s, "\r\n")
 }
 
-// isSGR reports whether s is a CSI SGR (Select Graphic Rendition) sequence.
-// It recognises both 7-bit (ESC [ <params> m) and 8-bit (0x9b <params> m) forms.
-func isSGR(s string) bool {
-	params, ok := sgrParams(s)
-	if !ok {
-		return false
-	}
-	return !hasPrivateCSIParameter(params)
-}
-
 func sgrParams(s string) (string, bool) {
 	if len(s) < 2 || s[len(s)-1] != 'm' {
 		return "", false
@@ -429,41 +410,263 @@ func hasPrivateCSIParameter(params string) bool {
 	}
 }
 
-// isSGRReset reports whether s is an SGR reset sequence.
-func isSGRReset(s string) bool {
-	params, ok := sgrParams(s)
-	return ok && !hasPrivateCSIParameter(params) && allSGRParamsReset(params)
+type sgrStyleState struct {
+	segments []sgrStyleSegment
 }
 
-func sgrStartsWithReset(s string) bool {
-	params, ok := sgrParams(s)
-	if !ok || hasPrivateCSIParameter(params) {
-		return false
-	}
-	first, _, _ := strings.Cut(params, ";")
-	return isZeroSGRParam(first)
+// sgrStyleSegment stores active SGR params from one input sequence. Removed or
+// replaced params are deleted so replay stays bounded and reflects terminal state.
+type sgrStyleSegment struct {
+	prefix string
+	params []sgrStyleParam
 }
 
-func allSGRParamsReset(params string) bool {
-	for {
-		param, rest, found := strings.Cut(params, ";")
-		if !isZeroSGRParam(param) {
-			return false
-		}
-		if !found {
+type sgrStyleParam struct {
+	key  string
+	text string
+}
+
+func (s *sgrStyleState) active() bool {
+	for _, segment := range s.segments {
+		if len(segment.params) > 0 {
 			return true
 		}
-		params = rest
+	}
+	return false
+}
+
+func (s *sgrStyleState) writeTo(b *strings.Builder) {
+	for _, segment := range s.segments {
+		if len(segment.params) == 0 {
+			continue
+		}
+		b.WriteString(segment.prefix)
+		for i, param := range segment.params {
+			if i > 0 {
+				b.WriteByte(';')
+			}
+			b.WriteString(param.text)
+		}
+		b.WriteByte('m')
 	}
 }
 
-func isZeroSGRParam(param string) bool {
-	for i := 0; i < len(param); i++ {
-		if param[i] != '0' {
-			return false
+func (s *sgrStyleState) apply(seq string) {
+	params, prefix, ok := sgrParamsAndPrefix(seq)
+	if !ok || hasPrivateCSIParameter(params) {
+		return
+	}
+
+	parts := strings.Split(params, ";")
+	if len(parts) == 0 {
+		parts = []string{""}
+	}
+
+	segmentIndex := len(s.segments)
+	s.segments = append(s.segments, sgrStyleSegment{prefix: prefix})
+	for i := 0; i < len(parts); i++ {
+		op := sgrParamOperation(parts, i)
+		i += op.extra
+
+		switch op.kind {
+		case sgrParamReset:
+			s.clear()
+			segmentIndex = len(s.segments)
+			s.segments = append(s.segments, sgrStyleSegment{prefix: prefix})
+		case sgrParamRemove:
+			for _, key := range op.keys {
+				s.remove(key)
+			}
+		case sgrParamSet:
+			s.remove(op.key)
+			s.segments[segmentIndex].params = append(s.segments[segmentIndex].params, sgrStyleParam{
+				key:  op.key,
+				text: strings.Join(parts[i-op.extra:i+1], ";"),
+			})
 		}
 	}
-	return true
+	s.compact()
+}
+
+func (s *sgrStyleState) clear() {
+	s.segments = s.segments[:0]
+}
+
+func (s *sgrStyleState) remove(key string) {
+	for i := range s.segments {
+		keep := s.segments[i].params[:0]
+		for _, param := range s.segments[i].params {
+			if param.key != key {
+				keep = append(keep, param)
+			}
+		}
+		s.segments[i].params = keep
+	}
+}
+
+func (s *sgrStyleState) compact() {
+	segments := s.segments[:0]
+	for _, segment := range s.segments {
+		if len(segment.params) > 0 {
+			segments = append(segments, segment)
+		}
+	}
+	s.segments = segments
+}
+
+type sgrParamKind int
+
+const (
+	sgrParamIgnore sgrParamKind = iota
+	sgrParamReset
+	sgrParamRemove
+	sgrParamSet
+)
+
+type sgrParamOp struct {
+	kind  sgrParamKind
+	key   string
+	keys  []string
+	extra int
+}
+
+func sgrParamOperation(parts []string, i int) sgrParamOp {
+	code, ok := sgrParamCode(parts[i])
+	if !ok {
+		return sgrParamOp{kind: sgrParamSet, key: "unknown"}
+	}
+
+	switch {
+	case code == 0:
+		return sgrParamOp{kind: sgrParamReset}
+	case code == 22:
+		return sgrParamOp{kind: sgrParamRemove, keys: []string{"bold", "faint"}}
+	case code == 23:
+		return sgrParamOp{kind: sgrParamRemove, keys: []string{"italic", "fraktur"}}
+	case code == 24:
+		return sgrParamOp{kind: sgrParamRemove, keys: []string{"underline"}}
+	case code == 25:
+		return sgrParamOp{kind: sgrParamRemove, keys: []string{"blink", "rapid-blink"}}
+	case code == 27:
+		return sgrParamOp{kind: sgrParamRemove, keys: []string{"inverse"}}
+	case code == 28:
+		return sgrParamOp{kind: sgrParamRemove, keys: []string{"conceal"}}
+	case code == 29:
+		return sgrParamOp{kind: sgrParamRemove, keys: []string{"strike"}}
+	case code == 39:
+		return sgrParamOp{kind: sgrParamRemove, keys: []string{"fg"}}
+	case code == 49:
+		return sgrParamOp{kind: sgrParamRemove, keys: []string{"bg"}}
+	case code == 54:
+		return sgrParamOp{kind: sgrParamRemove, keys: []string{"frame", "encircle"}}
+	case code == 55:
+		return sgrParamOp{kind: sgrParamRemove, keys: []string{"overline"}}
+	case code == 59:
+		return sgrParamOp{kind: sgrParamRemove, keys: []string{"underline-color"}}
+	case code == 1:
+		return sgrParamOp{kind: sgrParamSet, key: "bold"}
+	case code == 2:
+		return sgrParamOp{kind: sgrParamSet, key: "faint"}
+	case code == 3:
+		return sgrParamOp{kind: sgrParamSet, key: "italic"}
+	case code == 20:
+		return sgrParamOp{kind: sgrParamSet, key: "fraktur"}
+	case code == 4 || code == 21:
+		return sgrParamOp{kind: sgrParamSet, key: "underline"}
+	case code == 5:
+		return sgrParamOp{kind: sgrParamSet, key: "blink"}
+	case code == 6:
+		return sgrParamOp{kind: sgrParamSet, key: "rapid-blink"}
+	case code == 7:
+		return sgrParamOp{kind: sgrParamSet, key: "inverse"}
+	case code == 8:
+		return sgrParamOp{kind: sgrParamSet, key: "conceal"}
+	case code == 9:
+		return sgrParamOp{kind: sgrParamSet, key: "strike"}
+	case code == 10:
+		return sgrParamOp{kind: sgrParamRemove, keys: []string{"font"}}
+	case code >= 11 && code <= 19:
+		return sgrParamOp{kind: sgrParamSet, key: "font"}
+	case code >= 30 && code <= 37 || code >= 90 && code <= 97:
+		return sgrParamOp{kind: sgrParamSet, key: "fg"}
+	case code >= 40 && code <= 47 || code >= 100 && code <= 107:
+		return sgrParamOp{kind: sgrParamSet, key: "bg"}
+	case code == 38:
+		return sgrExtendedColorOperation(parts, i, "fg")
+	case code == 48:
+		return sgrExtendedColorOperation(parts, i, "bg")
+	case code == 51:
+		return sgrParamOp{kind: sgrParamSet, key: "frame"}
+	case code == 52:
+		return sgrParamOp{kind: sgrParamSet, key: "encircle"}
+	case code == 53:
+		return sgrParamOp{kind: sgrParamSet, key: "overline"}
+	case code == 58:
+		return sgrExtendedColorOperation(parts, i, "underline-color")
+	default:
+		return sgrParamOp{kind: sgrParamSet, key: "unknown"}
+	}
+}
+
+func sgrExtendedColorOperation(parts []string, i int, key string) sgrParamOp {
+	if strings.Contains(parts[i], ":") {
+		return sgrParamOp{kind: sgrParamSet, key: key}
+	}
+	if i+1 >= len(parts) {
+		return sgrParamOp{kind: sgrParamSet, key: key}
+	}
+
+	mode, ok := sgrParamCode(parts[i+1])
+	if !ok {
+		return sgrParamOp{kind: sgrParamSet, key: key}
+	}
+
+	switch mode {
+	case 5:
+		extra := len(parts) - i - 1
+		if extra > 2 {
+			extra = 2
+		}
+		return sgrParamOp{kind: sgrParamSet, key: key, extra: extra}
+	case 2:
+		extra := len(parts) - i - 1
+		if extra > 4 {
+			extra = 4
+		}
+		return sgrParamOp{kind: sgrParamSet, key: key, extra: extra}
+	}
+	return sgrParamOp{kind: sgrParamSet, key: key}
+}
+
+func sgrParamCode(param string) (int, bool) {
+	if before, _, ok := strings.Cut(param, ":"); ok {
+		param = before
+	}
+	if param == "" {
+		return 0, true
+	}
+	code := 0
+	for i := 0; i < len(param); i++ {
+		if param[i] < '0' || param[i] > '9' {
+			return 0, false
+		}
+		code = code*10 + int(param[i]-'0')
+		if code > 10000 {
+			return 0, false
+		}
+	}
+	return code, true
+}
+
+func sgrParamsAndPrefix(s string) (params string, prefix string, ok bool) {
+	params, ok = sgrParams(s)
+	if !ok {
+		return "", "", false
+	}
+	if s[0] == '\x9b' {
+		return params, "\x9b", true
+	}
+	return params, "\x1b[", true
 }
 
 // TruncateResult describes the outcome of a truncation operation.
