@@ -62,33 +62,73 @@ func (c *Condition) options() displaywidth.Options {
 	}
 }
 
+type scanToken struct {
+	text      string
+	width     int
+	tab       bool
+	lineBreak bool
+}
+
+type displayScanner struct {
+	graphemes displaywidth.Graphemes[string]
+	tabWidth  int
+	col       int
+	maxWidth  int
+}
+
+func (c *Condition) newDisplayScanner(s string, opts displaywidth.Options) displayScanner {
+	return displayScanner{
+		graphemes: opts.StringGraphemes(s),
+		tabWidth:  c.tabWidth(),
+	}
+}
+
+func (s *displayScanner) next() (scanToken, bool) {
+	if !s.graphemes.Next() {
+		return scanToken{}, false
+	}
+
+	text := s.graphemes.Value()
+	token := scanToken{
+		text: text,
+	}
+
+	if isLineBreak(text) {
+		token.lineBreak = true
+		s.finishLine()
+		s.col = 0
+		return token, true
+	}
+
+	if text == "\t" {
+		token.tab = true
+		token.width = s.tabWidth - s.col%s.tabWidth
+	} else {
+		token.width = s.graphemes.Width()
+	}
+	s.col += token.width
+	return token, true
+}
+
+func (s *displayScanner) finishLine() {
+	if s.col > s.maxWidth {
+		s.maxWidth = s.col
+	}
+}
+
+func (s *displayScanner) lineWidth() int {
+	s.finishLine()
+	return s.maxWidth
+}
+
 func (c *Condition) stringWidth(s string, opts displaywidth.Options) int {
-	tw := c.tabWidth()
-
-	maxW := 0
-	col := 0
-	gs := opts.StringGraphemes(s)
-	for gs.Next() {
-		v := gs.Value()
-		if isLineBreak(v) {
-			if col > maxW {
-				maxW = col
-			}
-			col = 0
-			continue
-		}
-
-		switch v {
-		case "\t":
-			col += tw - col%tw
-		default:
-			col += gs.Width()
+	scanner := c.newDisplayScanner(s, opts)
+	for {
+		if _, ok := scanner.next(); !ok {
+			break
 		}
 	}
-	if col > maxW {
-		maxW = col
-	}
-	return maxW
+	return scanner.lineWidth()
 }
 
 // StringWidth returns the display width of s in terminal columns.
@@ -127,38 +167,26 @@ func (c *Condition) expandTabFunc(s string, opts displaywidth.Options, fn func(n
 }
 
 func (c *Condition) expandTabFuncAndWidth(s string, opts displaywidth.Options, fn func(nSpaces int) string) (string, int) {
-	tw := c.tabWidth()
-
 	var b strings.Builder
 	b.Grow(len(s))
-	col := 0
-	maxW := 0
-	gs := opts.StringGraphemes(s)
-	for gs.Next() {
-		v := gs.Value()
-		if isLineBreak(v) {
-			if col > maxW {
-				maxW = col
-			}
-			b.WriteString(v)
-			col = 0
+
+	scanner := c.newDisplayScanner(s, opts)
+	for {
+		token, ok := scanner.next()
+		if !ok {
+			break
+		}
+		if token.lineBreak {
+			b.WriteString(token.text)
 			continue
 		}
-
-		switch v {
-		case "\t":
-			nSpaces := tw - col%tw
-			b.WriteString(fn(nSpaces))
-			col += nSpaces
-		default:
-			b.WriteString(v)
-			col += gs.Width()
+		if token.tab {
+			b.WriteString(fn(token.width))
+			continue
 		}
+		b.WriteString(token.text)
 	}
-	if col > maxW {
-		maxW = col
-	}
-	return b.String(), maxW
+	return b.String(), scanner.lineWidth()
 }
 
 func (c *Condition) expandTabSpacesWithOptions(s string, opts displaywidth.Options) string {
@@ -285,10 +313,10 @@ func trimWrappedLinesRight(s string, opts displaywidth.Options) string {
 	for {
 		line, lineBreak, rest := cutLineBreak(s)
 		b.WriteString(trimTrailingLineSpace(line, opts))
+		b.WriteString(lineBreak)
 		if lineBreak == "" {
 			return b.String()
 		}
-		b.WriteString(lineBreak)
 		s = rest
 	}
 }
@@ -333,16 +361,27 @@ func isLineBreak(s string) bool {
 	return s == "\n" || s == "\r" || s == "\r\n"
 }
 
+func lineBreakLenAt(s string, i int) int {
+	if i >= len(s) {
+		return 0
+	}
+	switch s[i] {
+	case '\n':
+		return 1
+	case '\r':
+		if i+1 < len(s) && s[i+1] == '\n' {
+			return 2
+		}
+		return 1
+	default:
+		return 0
+	}
+}
+
 func cutLineBreak(s string) (line string, lineBreak string, rest string) {
 	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '\n':
-			return s[:i], s[i : i+1], s[i+1:]
-		case '\r':
-			if i+1 < len(s) && s[i+1] == '\n' {
-				return s[:i], s[i : i+2], s[i+2:]
-			}
-			return s[:i], s[i : i+1], s[i+1:]
+		if n := lineBreakLenAt(s, i); n > 0 {
+			return s[:i], s[i : i+n], s[i+n:]
 		}
 	}
 	return s, "", ""
@@ -485,10 +524,10 @@ func (c *Condition) TruncateInfo(s string, maxWidth int, tail string) TruncateRe
 			result.Width = lineResult.Width
 		}
 		result.Truncated = result.Truncated || lineResult.Truncated
+		b.WriteString(lineBreak)
 		if lineBreak == "" {
 			break
 		}
-		b.WriteString(lineBreak)
 		s = rest
 	}
 	result.Text = b.String()
