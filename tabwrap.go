@@ -310,11 +310,15 @@ func trimWrappedLinesRight(s string, opts displaywidth.Options) string {
 	var b strings.Builder
 	b.Grow(len(s))
 
-	forEachLine(s, func(line, lineBreak string) {
+	for {
+		line, lineBreak, rest := cutLineBreak(s)
 		b.WriteString(trimTrailingLineSpace(line, opts))
 		b.WriteString(lineBreak)
-	})
-	return b.String()
+		if lineBreak == "" {
+			return b.String()
+		}
+		s = rest
+	}
 }
 
 func trimTrailingLineSpace(s string, opts displaywidth.Options) string {
@@ -383,20 +387,8 @@ func cutLineBreak(s string) (line string, lineBreak string, rest string) {
 	return s, "", ""
 }
 
-func forEachLine(s string, fn func(line, lineBreak string)) {
-	for {
-		line, lineBreak, rest := cutLineBreak(s)
-		fn(line, lineBreak)
-		if lineBreak == "" {
-			return
-		}
-		s = rest
-	}
-}
-
 func containsLineBreak(s string) bool {
-	_, lineBreak, _ := cutLineBreak(s)
-	return lineBreak != ""
+	return strings.ContainsAny(s, "\r\n")
 }
 
 // isSGR reports whether s is a CSI SGR (Select Graphic Rendition) sequence.
@@ -524,7 +516,8 @@ func (c *Condition) TruncateInfo(s string, maxWidth int, tail string) TruncateRe
 	var b strings.Builder
 	b.Grow(len(s))
 	result := TruncateResult{}
-	forEachLine(s, func(line, lineBreak string) {
+	for {
+		line, lineBreak, rest := cutLineBreak(s)
 		lineResult := c.truncateLineInfo(line, maxWidth, tail, opts)
 		b.WriteString(lineResult.Text)
 		if lineResult.Width > result.Width {
@@ -532,7 +525,11 @@ func (c *Condition) TruncateInfo(s string, maxWidth int, tail string) TruncateRe
 		}
 		result.Truncated = result.Truncated || lineResult.Truncated
 		b.WriteString(lineBreak)
-	})
+		if lineBreak == "" {
+			break
+		}
+		s = rest
+	}
 	result.Text = b.String()
 	return result
 }
