@@ -894,6 +894,13 @@ func TestWrapSGRTrackingTightening(t *testing.T) {
 	fg256 := "\x1b[38;5;196m"
 	fgRGB := "\x1b[38;2;1;2;3m"
 	bgRGB := "\x1b[48;2;4;5;6m"
+	malformedFG256 := "\x1b[38;5m"
+	malformedFGRGB := "\x1b[38;2;1;2m"
+	malformedBG256 := "\x1b[48;5m"
+	malformedUnderline256 := "\x1b[58;5m"
+	underlineColorOff := "\x1b[59m"
+	fraktur := "\x1b[20m"
+	italicFrakturOff := "\x1b[23m"
 	unknown60 := "\x1b[60m"
 	unknown61 := "\x1b[61m"
 
@@ -976,6 +983,36 @@ func TestWrapSGRTrackingTightening(t *testing.T) {
 			want:  fgRGB + bgRGB + "ab" + fgOff + "c" + reset + "\n" + bgRGB + "def" + reset,
 		},
 		{
+			name:  "malformed 256 foreground is consumed before foreground off",
+			s:     malformedFG256 + fgOff + "abcdef",
+			width: 3,
+			want:  malformedFG256 + fgOff + "abc\n" + "def",
+		},
+		{
+			name:  "malformed RGB foreground is consumed before foreground off",
+			s:     malformedFGRGB + fgOff + "abcdef",
+			width: 3,
+			want:  malformedFGRGB + fgOff + "abc\n" + "def",
+		},
+		{
+			name:  "malformed 256 background is consumed before background off",
+			s:     malformedBG256 + bgOff + "abcdef",
+			width: 3,
+			want:  malformedBG256 + bgOff + "abc\n" + "def",
+		},
+		{
+			name:  "malformed underline color is consumed before underline color off",
+			s:     malformedUnderline256 + underlineColorOff + "abcdef",
+			width: 3,
+			want:  malformedUnderline256 + underlineColorOff + "abc\n" + "def",
+		},
+		{
+			name:  "fraktur off removes fraktur",
+			s:     fraktur + "ab" + italicFrakturOff + "cdef",
+			width: 3,
+			want:  fraktur + "ab" + italicFrakturOff + "c\n" + "def",
+		},
+		{
 			name:  "unknown SGR replay remains bounded",
 			s:     unknown60 + "abc" + unknown61 + "def" + reset,
 			width: 3,
@@ -987,6 +1024,93 @@ func TestWrapSGRTrackingTightening(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := c.Wrap(tt.s, tt.width)
+			if got != tt.want {
+				t.Errorf("Wrap(%q, %d):\n got  %q\n want %q", tt.s, tt.width, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWrapSGRTrackingTightening8Bit(t *testing.T) {
+	t.Parallel()
+
+	reset7 := "\x1b[0m"
+	blue7 := "\x1b[34m"
+
+	red8 := "\x9b31m"
+	bold8 := "\x9b1m"
+	resetRed8 := "\x9b0;31m"
+	green8 := "\x9b32m"
+	blue8 := "\x9b34m"
+	reset8 := "\x9b0m"
+	boldOff8 := "\x9b22m"
+	fgOff8 := "\x9b39m"
+	fgRGB8 := "\x9b38;2;1;2;3m"
+	bgRGB8 := "\x9b48;2;4;5;6m"
+	malformedFG2568 := "\x9b38;5m"
+
+	tests := []struct {
+		name  string
+		c     *Condition
+		s     string
+		width int
+		want  string
+	}{
+		{
+			name:  "leading reset composite drops previous 8-bit state",
+			c:     &Condition{TabWidth: 4, ControlSequences8Bit: true},
+			s:     bold8 + resetRed8 + "abcdef" + reset8,
+			width: 3,
+			want:  bold8 + resetRed8 + "abc" + reset8 + "\n" + red8 + "def" + reset8,
+		},
+		{
+			name:  "repeated 8-bit foreground changes replay only latest color",
+			c:     &Condition{TabWidth: 4, ControlSequences8Bit: true},
+			s:     red8 + green8 + "abc" + blue8 + "def" + reset8,
+			width: 3,
+			want:  red8 + green8 + "abc" + blue8 + reset8 + "\n" + blue8 + "def" + reset8,
+		},
+		{
+			name:  "8-bit foreground off removes color and keeps bold",
+			c:     &Condition{TabWidth: 4, ControlSequences8Bit: true},
+			s:     bold8 + red8 + "ab" + fgOff8 + "cdef" + reset8,
+			width: 3,
+			want:  bold8 + red8 + "ab" + fgOff8 + "c" + reset8 + "\n" + bold8 + "def" + reset8,
+		},
+		{
+			name:  "8-bit intensity off removes bold and keeps foreground",
+			c:     &Condition{TabWidth: 4, ControlSequences8Bit: true},
+			s:     bold8 + red8 + "ab" + boldOff8 + "cdef" + reset8,
+			width: 3,
+			want:  bold8 + red8 + "ab" + boldOff8 + "c" + reset8 + "\n" + red8 + "def" + reset8,
+		},
+		{
+			name:  "8-bit extended foreground off keeps background",
+			c:     &Condition{TabWidth: 4, ControlSequences8Bit: true},
+			s:     fgRGB8 + bgRGB8 + "ab" + fgOff8 + "cdef" + reset8,
+			width: 3,
+			want:  fgRGB8 + bgRGB8 + "ab" + fgOff8 + "c" + reset8 + "\n" + bgRGB8 + "def" + reset8,
+		},
+		{
+			name:  "malformed 8-bit foreground is consumed before foreground off",
+			c:     &Condition{TabWidth: 4, ControlSequences8Bit: true},
+			s:     malformedFG2568 + fgOff8 + "abcdef",
+			width: 3,
+			want:  malformedFG2568 + fgOff8 + "abc\n" + "def",
+		},
+		{
+			name:  "mixed 8-bit and 7-bit foreground replays latest prefix",
+			c:     &Condition{TabWidth: 4, ControlSequences: true, ControlSequences8Bit: true},
+			s:     red8 + "abc" + blue7 + "def" + reset7,
+			width: 3,
+			want:  red8 + "abc" + blue7 + reset7 + "\n" + blue7 + "def" + reset7,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := tt.c.Wrap(tt.s, tt.width)
 			if got != tt.want {
 				t.Errorf("Wrap(%q, %d):\n got  %q\n want %q", tt.s, tt.width, got, tt.want)
 			}

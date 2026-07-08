@@ -533,6 +533,8 @@ func sgrParamOperation(parts []string, i int) sgrParamOp {
 		return sgrParamOp{kind: sgrParamSet, key: "faint"}
 	case code == 3:
 		return sgrParamOp{kind: sgrParamSet, key: "italic"}
+	case code == 20:
+		return sgrParamOp{kind: sgrParamSet, key: "fraktur"}
 	case code == 4 || code == 21:
 		return sgrParamOp{kind: sgrParamSet, key: "underline"}
 	case code == 5:
@@ -588,10 +590,12 @@ func sgrExtendedColorOperation(parts []string, i int, key string) sgrParamOp {
 		if i+2 < len(parts) {
 			return sgrParamOp{kind: sgrParamSet, key: key, extra: 2}
 		}
+		return sgrParamOp{kind: sgrParamSet, key: key, extra: len(parts) - i - 1}
 	case 2:
 		if i+4 < len(parts) {
 			return sgrParamOp{kind: sgrParamSet, key: key, extra: 4}
 		}
+		return sgrParamOp{kind: sgrParamSet, key: key, extra: len(parts) - i - 1}
 	}
 	return sgrParamOp{kind: sgrParamSet, key: key}
 }
