@@ -1,7 +1,6 @@
 package tabwrap
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/clipperhouse/displaywidth"
@@ -456,15 +455,13 @@ func (s *sgrStyleState) clear() {
 
 func (s *sgrStyleState) remove(key string) {
 	for i := range s.segments {
-		params := s.segments[i].params
-		for j := 0; j < len(params); j++ {
-			if params[j].key != key {
-				continue
+		keep := s.segments[i].params[:0]
+		for _, param := range s.segments[i].params {
+			if param.key != key {
+				keep = append(keep, param)
 			}
-			params = append(params[:j], params[j+1:]...)
-			j--
 		}
-		s.segments[i].params = params
+		s.segments[i].params = keep
 	}
 }
 
@@ -587,15 +584,17 @@ func sgrExtendedColorOperation(parts []string, i int, key string) sgrParamOp {
 
 	switch mode {
 	case 5:
-		if i+2 < len(parts) {
-			return sgrParamOp{kind: sgrParamSet, key: key, extra: 2}
+		extra := len(parts) - i - 1
+		if extra > 2 {
+			extra = 2
 		}
-		return sgrParamOp{kind: sgrParamSet, key: key, extra: len(parts) - i - 1}
+		return sgrParamOp{kind: sgrParamSet, key: key, extra: extra}
 	case 2:
-		if i+4 < len(parts) {
-			return sgrParamOp{kind: sgrParamSet, key: key, extra: 4}
+		extra := len(parts) - i - 1
+		if extra > 4 {
+			extra = 4
 		}
-		return sgrParamOp{kind: sgrParamSet, key: key, extra: len(parts) - i - 1}
+		return sgrParamOp{kind: sgrParamSet, key: key, extra: extra}
 	}
 	return sgrParamOp{kind: sgrParamSet, key: key}
 }
@@ -607,14 +606,15 @@ func sgrParamCode(param string) (int, bool) {
 	if param == "" {
 		return 0, true
 	}
+	code := 0
 	for i := 0; i < len(param); i++ {
 		if param[i] < '0' || param[i] > '9' {
 			return 0, false
 		}
-	}
-	code, err := strconv.Atoi(param)
-	if err != nil {
-		return 0, false
+		code = code*10 + int(param[i]-'0')
+		if code > 10000 {
+			return 0, false
+		}
 	}
 	return code, true
 }
