@@ -358,7 +358,7 @@ func trimTrailingLineSpace(s string, opts displaywidth.Options) string {
 }
 
 func isLineBreak(s string) bool {
-	return len(s) > 0 && lineBreakLenAt(s, 0) == len(s)
+	return s == "\n" || s == "\r" || s == "\r\n"
 }
 
 func lineBreakLenAt(s string, i int) int {
