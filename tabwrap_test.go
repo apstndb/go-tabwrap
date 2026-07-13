@@ -1,6 +1,7 @@
 package tabwrap
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -335,6 +336,434 @@ func TestWrapTrimTrailingSpace(t *testing.T) {
 	})
 }
 
+func TestCut(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		c     Condition
+		s     string
+		width int
+		want  CutResult
+	}{
+		{
+			name:  "tab exact fit preserves source rest",
+			s:     "\tX",
+			width: 4,
+			want:  CutResult{Text: "    ", Rest: "X", Width: 4},
+		},
+		{
+			name:  "tab fits with following text",
+			s:     "\tX",
+			width: 10,
+			want:  CutResult{Text: "    X", Width: 5},
+		},
+		{
+			name:  "tab expansion cannot skip source",
+			s:     "ab\tcdefghij",
+			width: 6,
+			want:  CutResult{Text: "ab  cd", Rest: "efghij", Width: 6},
+		},
+		{
+			name:  "overwide tab makes progress",
+			s:     "\tX",
+			width: 2,
+			want:  CutResult{Text: "    ", Rest: "X", Width: 4, Overflow: true},
+		},
+		{
+			name:  "overwide grapheme stays whole",
+			s:     "🇯🇵!",
+			width: 1,
+			want:  CutResult{Text: "🇯🇵", Rest: "!", Width: 2, Overflow: true},
+		},
+		{
+			name:  "combining grapheme stays whole",
+			s:     "e\u0301!",
+			width: 1,
+			want:  CutResult{Text: "e\u0301", Rest: "!", Width: 1},
+		},
+		{
+			name:  "natural LF is consumed",
+			s:     "a\nb",
+			width: 10,
+			want:  CutResult{Text: "a", LineBreak: "\n", Rest: "b", Width: 1},
+		},
+		{
+			name:  "leading LF makes progress",
+			s:     "\nb",
+			width: 10,
+			want:  CutResult{LineBreak: "\n", Rest: "b"},
+		},
+		{
+			name:  "trailing CR is consumed",
+			s:     "a\r",
+			width: 5,
+			want:  CutResult{Text: "a", LineBreak: "\r", Width: 1},
+		},
+		{
+			name:  "CRLF is consumed atomically",
+			s:     "a\r\nb",
+			width: 5,
+			want:  CutResult{Text: "a", LineBreak: "\r\n", Rest: "b", Width: 1},
+		},
+		{
+			name:  "non-positive width is unbounded",
+			s:     "abc",
+			width: 0,
+			want:  CutResult{Text: "abc", Width: 3},
+		},
+		{
+			name:  "empty input returns zero value",
+			s:     "",
+			width: 5,
+			want:  CutResult{},
+		},
+		{
+			name:  "trailing space is not trimmed",
+			c:     Condition{TrimTrailingSpace: true},
+			s:     "a ",
+			width: 5,
+			want:  CutResult{Text: "a ", Width: 2},
+		},
+		{
+			name:  "7-bit control state stays with consumed text",
+			c:     Condition{ControlSequences: true},
+			s:     "\x1b[31mAB\x1b[0mC",
+			width: 2,
+			want:  CutResult{Text: "\x1b[31mAB\x1b[0m", Rest: "C", Width: 2},
+		},
+		{
+			name:  "control state after natural break stays in rest",
+			c:     Condition{ControlSequences: true},
+			s:     "A\n\x1b[31mB",
+			width: 5,
+			want:  CutResult{Text: "A", LineBreak: "\n", Rest: "\x1b[31mB", Width: 1},
+		},
+		{
+			name:  "8-bit control sequences follow Wrap semantics",
+			c:     Condition{ControlSequences8Bit: true},
+			s:     "\x9b31mAB\x9b0mC",
+			width: 2,
+			want:  CutResult{Text: "\x9b31mAB\x9b0m", Rest: "C", Width: 2},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := tt.c.Cut(tt.s, tt.width)
+			if got != tt.want {
+				t.Errorf("Cut(%q, %d) = %+v, want %+v", tt.s, tt.width, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCutLoopProgress(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		s     string
+		width int
+	}{
+		{name: "tabs", s: "ab\tcdefghij", width: 6},
+		{name: "empty lines", s: "a\n\nb", width: 2},
+		{name: "all line breaks", s: "a\r\nb\rc\n", width: 1},
+		{name: "overwide grapheme", s: "🇯🇵!", width: 1},
+		{name: "unbounded", s: "abc\ndef", width: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rest := tt.s
+			var reconstructed strings.Builder
+			for rest != "" {
+				result := Cut(rest, tt.width)
+				if len(result.Rest) >= len(rest) {
+					t.Fatalf("Cut(%q, %d) did not make progress: %+v", rest, tt.width, result)
+				}
+				consumed := rest[:len(rest)-len(result.Rest)]
+				reconstructed.WriteString(consumed)
+				rest = result.Rest
+			}
+			if got := reconstructed.String(); got != tt.s {
+				t.Errorf("reconstructed source = %q, want %q", got, tt.s)
+			}
+		})
+	}
+}
+
+func TestWrapLines(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		c          Condition
+		s          string
+		firstWidth int
+		restWidth  int
+		want       []WrapLine
+	}{
+		{
+			name:       "first and continuation widths",
+			s:          "abcdef",
+			firstWidth: 2,
+			restWidth:  3,
+			want: []WrapLine{
+				{Text: "ab", LineBreak: "\n", Width: 2},
+				{Text: "cde", LineBreak: "\n", Width: 3},
+				{Text: "f", Width: 1},
+			},
+		},
+		{
+			name:       "natural empty lines",
+			s:          "a\n\nb",
+			firstWidth: 5,
+			restWidth:  3,
+			want: []WrapLine{
+				{Text: "a", LineBreak: "\n", Width: 1},
+				{LineBreak: "\n"},
+				{Text: "b", Width: 1},
+			},
+		},
+		{
+			name:       "trailing break returns final empty line",
+			s:          "a\n",
+			firstWidth: 5,
+			restWidth:  3,
+			want: []WrapLine{
+				{Text: "a", LineBreak: "\n", Width: 1},
+				{},
+			},
+		},
+		{
+			name:       "empty input returns one line",
+			s:          "",
+			firstWidth: 5,
+			restWidth:  3,
+			want:       []WrapLine{{}},
+		},
+		{
+			name:       "natural CRLF and inserted LF",
+			s:          "abc\r\ndefgh",
+			firstWidth: 5,
+			restWidth:  3,
+			want: []WrapLine{
+				{Text: "abc", LineBreak: "\r\n", Width: 3},
+				{Text: "def", LineBreak: "\n", Width: 3},
+				{Text: "gh", Width: 2},
+			},
+		},
+		{
+			name:       "tabs preserve source progress",
+			s:          "ab\tcd",
+			firstWidth: 4,
+			restWidth:  2,
+			want: []WrapLine{
+				{Text: "ab  ", LineBreak: "\n", Width: 4},
+				{Text: "cd", Width: 2},
+			},
+		},
+		{
+			name:       "overwide grapheme is reported",
+			s:          "🇯🇵!",
+			firstWidth: 1,
+			restWidth:  1,
+			want: []WrapLine{
+				{Text: "🇯🇵", LineBreak: "\n", Width: 2, Overflow: true},
+				{Text: "!", Width: 1},
+			},
+		},
+		{
+			name:       "non-positive lanes are unbounded",
+			s:          "a\tb\rc\td",
+			firstWidth: 0,
+			restWidth:  -1,
+			want: []WrapLine{
+				{Text: "a   b", LineBreak: "\r", Width: 5},
+				{Text: "c   d", Width: 5},
+			},
+		},
+		{
+			name:       "trailing space trimming applies per line",
+			c:          Condition{TrimTrailingSpace: true},
+			s:          "ab\tcd",
+			firstWidth: 4,
+			restWidth:  2,
+			want: []WrapLine{
+				{Text: "ab", LineBreak: "\n", Width: 2},
+				{Text: "cd", Width: 2},
+			},
+		},
+		{
+			name:       "trimming keeps adjacent CR and LF as distinct breaks",
+			c:          Condition{TrimTrailingSpace: true},
+			s:          "0\r \n",
+			firstWidth: 3,
+			restWidth:  3,
+			want: []WrapLine{
+				{Text: "0", LineBreak: "\r", Width: 1},
+				{LineBreak: "\n"},
+				{},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := tt.c.WrapLines(tt.s, tt.firstWidth, tt.restWidth)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("WrapLines() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWrapLinesMatchesWrap(t *testing.T) {
+	t.Parallel()
+
+	conditions := []Condition{
+		{},
+		{TabWidth: 8},
+		{EastAsianWidth: true},
+		{TrimTrailingSpace: true},
+		{ControlSequences: true},
+		{ControlSequences8Bit: true},
+		{ControlSequences: true, ControlSequences8Bit: true, TrimTrailingSpace: true},
+	}
+	inputs := []string{
+		"",
+		"hello world",
+		"ab\tcd",
+		"日本語",
+		"e\u0301🇯🇵!",
+		"a\n\nb",
+		"a\r\nb\rc\n",
+		"\x1b[31mhello world\x1b[0m",
+		"\x9b31mhello world\x9b0m",
+	}
+	widths := []int{-1, 0, 1, 4, 10}
+
+	for _, c := range conditions {
+		for _, input := range inputs {
+			for _, width := range widths {
+				lines := c.WrapLines(input, width, width)
+				got := joinWrapLines(lines)
+				want := c.Wrap(input, width)
+				if got != want {
+					t.Fatalf("join(WrapLines(%q, %d, %d)) = %q, want Wrap = %q; condition=%+v", input, width, width, got, want, c)
+				}
+			}
+		}
+	}
+}
+
+func TestWrapLinesWidthUsesRenderedText(t *testing.T) {
+	t.Parallel()
+
+	c := Condition{}
+	const input = "aa\t\ufe0f"
+	lines := c.WrapLines(input, 0, 0)
+	if len(lines) != 1 {
+		t.Fatalf("WrapLines() returned %d lines, want 1: %+v", len(lines), lines)
+	}
+	renderedWidth := c.StringWidth(lines[0].Text)
+	if sourceWidth := c.StringWidth(input); sourceWidth == renderedWidth {
+		t.Fatalf("test fixture does not distinguish source and rendered widths: both are %d", renderedWidth)
+	}
+	if got, want := lines[0].Width, renderedWidth; got != want {
+		t.Errorf("WrapLines()[0].Width = %d, rendered text width = %d; line=%+v", got, want, lines[0])
+	}
+}
+
+func TestWrapLinesSGRCarryOver(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		c     Condition
+		red   string
+		reset string
+	}{
+		{
+			name:  "7-bit",
+			c:     Condition{ControlSequences: true},
+			red:   "\x1b[31m",
+			reset: "\x1b[0m",
+		},
+		{
+			name:  "8-bit",
+			c:     Condition{ControlSequences8Bit: true},
+			red:   "\x9b31m",
+			reset: "\x9b0m",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := tt.c.WrapLines(tt.red+"abcdef"+tt.reset, 3, 3)
+			want := []WrapLine{
+				{Text: tt.red + "abc" + tt.reset, LineBreak: "\n", Width: 3},
+				{Text: tt.red + "def" + tt.reset, Width: 3},
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("WrapLines() = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestCutControlSequenceOptions(t *testing.T) {
+	t.Parallel()
+
+	red7 := "\x1b[31m"
+	reset7 := "\x1b[0m"
+	red8 := "\x9b31m"
+	reset8 := "\x9b0m"
+
+	sevenBit := Condition{ControlSequences: true}
+	if got := sevenBit.Cut(red7+"AB"+reset7+"C", 2); got.Rest != "C" || got.Width != 2 {
+		t.Errorf("7-bit Cut() = %+v, want Rest C and width 2", got)
+	}
+	if got := sevenBit.Cut(red8+"AB"+reset8+"C", 2); got.Rest == "C" {
+		t.Errorf("7-bit-only Cut unexpectedly recognized 8-bit controls: %+v", got)
+	}
+
+	eightBit := Condition{ControlSequences8Bit: true}
+	if got := eightBit.Cut(red8+"AB"+reset8+"C", 2); got.Rest != "C" || got.Width != 2 {
+		t.Errorf("8-bit Cut() = %+v, want Rest C and width 2", got)
+	}
+	if got := eightBit.Cut(red7+"AB"+reset7+"C", 2); got.Rest == "C" {
+		t.Errorf("8-bit-only Cut unexpectedly recognized 7-bit controls: %+v", got)
+	}
+
+	both := Condition{ControlSequences: true, ControlSequences8Bit: true}
+	for name, input := range map[string]string{
+		"7-bit": red7 + "AB" + reset7 + "C",
+		"8-bit": red8 + "AB" + reset8 + "C",
+	} {
+		t.Run(name+" with both options", func(t *testing.T) {
+			t.Parallel()
+			if got := both.Cut(input, 2); got.Rest != "C" || got.Width != 2 {
+				t.Errorf("Cut() = %+v, want Rest C and width 2", got)
+			}
+		})
+	}
+}
+
+func joinWrapLines(lines []WrapLine) string {
+	var b strings.Builder
+	for _, line := range lines {
+		b.WriteString(line.Text)
+		b.WriteString(line.LineBreak)
+	}
+	return b.String()
+}
+
 func TestTruncate(t *testing.T) {
 	t.Parallel()
 	c := NewCondition()
@@ -355,7 +784,7 @@ func TestTruncate(t *testing.T) {
 		{"tab in string fits", "a\tb", 5, "...", "a   b"},
 		{"tab in string truncated", "a\tbc", 5, "...", "a ..."},
 		{"tail tab expands independently", "hello world", 8, "\tX", "hel    X"},
-		{"width zero", "hello", 0, "...", "..."},
+		{"width zero", "hello", 0, "...", ""},
 	}
 
 	for _, tt := range tests {
@@ -365,7 +794,7 @@ func TestTruncate(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("Truncate(%q, %d, %q) = %q, want %q", tt.s, tt.maxWidth, tt.tail, got, tt.want)
 			}
-			if tt.maxWidth > 0 && c.StringWidth(got) > tt.maxWidth {
+			if tt.maxWidth >= 0 && c.StringWidth(got) > tt.maxWidth {
 				t.Errorf("Truncate(%q, %d, %q) visible width = %d, want <= %d", tt.s, tt.maxWidth, tt.tail, c.StringWidth(got), tt.maxWidth)
 			}
 		})
@@ -398,18 +827,25 @@ func TestTruncateInfo(t *testing.T) {
 			want: TruncateResult{Text: "hello...", Width: 8, Truncated: true},
 		},
 		{
-			name: "non-positive width preserves tail bytes",
+			name: "non-positive width returns empty",
 			s:    "hello",
 			max:  0,
 			tail: "\t",
-			want: TruncateResult{Text: "\t", Width: 4, Truncated: true},
+			want: TruncateResult{Truncated: true},
 		},
 		{
-			name: "non-positive width returns one tail for multi-line input",
+			name: "non-positive width returns empty for multi-line input",
 			s:    "hello\nworld",
 			max:  0,
 			tail: "...",
-			want: TruncateResult{Text: "...", Width: 3, Truncated: true},
+			want: TruncateResult{Truncated: true},
+		},
+		{
+			name: "non-positive width empty input is not truncated",
+			s:    "",
+			max:  -1,
+			tail: "...",
+			want: TruncateResult{},
 		},
 		{
 			name: "multi-line widest line fits",
@@ -539,6 +975,15 @@ func TestPackageLevelFunctions(t *testing.T) {
 		return "→" + strings.Repeat(" ", n-1)
 	}); got != "abc→d" {
 		t.Errorf("ExpandTabFunc = %q, want %q", got, "abc→d")
+	}
+	if got := Cut("ab", 1); got != (CutResult{Text: "a", Rest: "b", Width: 1}) {
+		t.Errorf("Cut = %+v, want text a, rest b, width 1", got)
+	}
+	if got := WrapLines("abc", 1, 2); !slices.Equal(got, []WrapLine{
+		{Text: "a", LineBreak: "\n", Width: 1},
+		{Text: "bc", Width: 2},
+	}) {
+		t.Errorf("WrapLines = %+v, want first width 1 and rest width 2", got)
 	}
 	if got := Wrap("helloworld", 5); got != "hello\nworld" {
 		t.Errorf("Wrap = %q, want %q", got, "hello\nworld")
@@ -1205,6 +1650,79 @@ func FuzzTruncateSingleLineWidth(f *testing.F) {
 		got := c.Truncate(s, maxWidth, tail)
 		if width := c.StringWidth(got); width > maxWidth {
 			t.Fatalf("StringWidth(Truncate(%q, %d, %q)) = %d, want <= %d; got %q", s, maxWidth, tail, width, maxWidth, got)
+		}
+	})
+}
+
+func FuzzCutProgress(f *testing.F) {
+	for _, seed := range []struct {
+		s     string
+		width int
+	}{
+		{s: "ab\tcdefghij", width: 6},
+		{s: "a\n\nb", width: 2},
+		{s: "a\r\nb\rc\n", width: 1},
+		{s: "🇯🇵!", width: 1},
+		{s: "e\u0301!", width: 1},
+	} {
+		f.Add(seed.s, seed.width)
+	}
+
+	f.Fuzz(func(t *testing.T, s string, width int) {
+		if !utf8.ValidString(s) {
+			t.Skip()
+		}
+		width %= 40
+
+		rest := s
+		var reconstructed strings.Builder
+		for steps := 0; rest != ""; steps++ {
+			if steps > len(s) {
+				t.Fatalf("Cut loop exceeded source byte length for %q", s)
+			}
+			result := Cut(rest, width)
+			if len(result.Rest) >= len(rest) {
+				t.Fatalf("Cut(%q, %d) did not make progress: %+v", rest, width, result)
+			}
+			reconstructed.WriteString(rest[:len(rest)-len(result.Rest)])
+			rest = result.Rest
+		}
+		if got := reconstructed.String(); got != s {
+			t.Fatalf("reconstructed source = %q, want %q", got, s)
+		}
+	})
+}
+
+func FuzzWrapLinesMatchesWrap(f *testing.F) {
+	for _, seed := range []struct {
+		s     string
+		width int
+	}{
+		{s: "hello world", width: 5},
+		{s: "ab\tcd", width: 4},
+		{s: "a\r\nb\rc\n", width: 3},
+		{s: "🇯🇵!", width: 1},
+		{s: "\x1b[31mabcdef\x1b[0m", width: 3},
+	} {
+		f.Add(seed.s, seed.width)
+	}
+
+	f.Fuzz(func(t *testing.T, s string, width int) {
+		if !utf8.ValidString(s) {
+			t.Skip()
+		}
+		width %= 40
+
+		conditions := []Condition{
+			{},
+			{TrimTrailingSpace: true},
+			{ControlSequences: true},
+		}
+		for _, c := range conditions {
+			got := joinWrapLines(c.WrapLines(s, width, width))
+			if want := c.Wrap(s, width); got != want {
+				t.Fatalf("join(WrapLines(%q, %d, %d)) = %q, want Wrap = %q; condition=%+v", s, width, width, got, want, c)
+			}
 		}
 	})
 }

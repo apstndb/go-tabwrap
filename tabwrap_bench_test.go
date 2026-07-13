@@ -8,6 +8,8 @@ import (
 var (
 	sinkInt    int
 	sinkString string
+	sinkCut    CutResult
+	sinkLines  []WrapLine
 )
 
 func BenchmarkStringWidth(b *testing.B) {
@@ -72,6 +74,47 @@ func BenchmarkWrap(b *testing.B) {
 			sinkString = c.Wrap("col1\tcol2\tcol3\tcol4", 10)
 		}
 	})
+}
+
+func BenchmarkCut(b *testing.B) {
+	c := NewCondition()
+
+	b.Run("plain", func(b *testing.B) {
+		for range b.N {
+			sinkCut = c.Cut("hello world", 5)
+		}
+	})
+
+	b.Run("with_tabs", func(b *testing.B) {
+		for range b.N {
+			sinkCut = c.Cut("col1\tcol2\tcol3", 10)
+		}
+	})
+}
+
+func BenchmarkCutIterativeLargeInput(b *testing.B) {
+	c := NewCondition()
+	s := strings.Repeat("abcdefgh", 8*1024) // 64 KiB
+
+	b.ReportAllocs()
+	for range b.N {
+		rest := s
+		consumed := 0
+		for rest != "" {
+			result := c.Cut(rest, 8)
+			consumed += len(rest) - len(result.Rest)
+			rest = result.Rest
+		}
+		sinkInt = consumed
+	}
+}
+
+func BenchmarkWrapLines(b *testing.B) {
+	c := NewCondition()
+	s := strings.Repeat("hello world ", 20)
+	for range b.N {
+		sinkLines = c.WrapLines(s, 20, 40)
+	}
 }
 
 func BenchmarkWrapSGR(b *testing.B) {

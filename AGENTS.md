@@ -4,9 +4,9 @@
 
 `github.com/apstndb/go-tabwrap` is a small, dependency-light Go library providing
 tab-aware, grapheme-cluster-aware display width operations for terminal output:
-`StringWidth`, `ExpandTab`, `ExpandTabFunc`, `Wrap`, `Truncate`,
-`TruncateInfo`, `FillLeft`, `FillRight`, all available as package-level
-functions (default settings) and as methods on `Condition`. It wraps
+`StringWidth`, `ExpandTab`, `ExpandTabFunc`, `Cut`, `Wrap`, `WrapLines`,
+`Truncate`, `TruncateInfo`, `FillLeft`, `FillRight`, all available as
+package-level functions (default settings) and as methods on `Condition`. It wraps
 `github.com/clipperhouse/displaywidth` (grapheme iteration and per-grapheme
 width) and adds tab-stop expansion, wrapping, truncation, and padding on top.
 
@@ -23,6 +23,10 @@ width) and adds tab-stop expansion, wrapping, truncation, and padding on top.
   UTF-8 boundaries — documented in godoc and README).
 - `Wrap` treats tabs as indivisible tokens and carries SGR state across line
   breaks (reset before the line break, replay after).
+- `Cut` reports source consumption through an exact `Rest` suffix and consumes
+  natural line breaks separately; rendered byte length is never a source offset.
+- Non-positive wrapping lane widths are unbounded. A non-positive `Truncate`
+  cap returns an empty result.
 
 ## Layout
 
