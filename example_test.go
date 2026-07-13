@@ -25,6 +25,22 @@ func ExampleWrap() {
 	// d
 }
 
+func ExampleCut() {
+	result := tabwrap.Cut("\tX", 4)
+	fmt.Printf("text=%q rest=%q width=%d overflow=%t\n", result.Text, result.Rest, result.Width, result.Overflow)
+	// Output: text="    " rest="X" width=4 overflow=false
+}
+
+func ExampleWrapLines() {
+	for _, line := range tabwrap.WrapLines("abcdef", 2, 3) {
+		fmt.Printf("text=%q break=%q width=%d\n", line.Text, line.LineBreak, line.Width)
+	}
+	// Output:
+	// text="ab" break="\n" width=2
+	// text="cde" break="\n" width=3
+	// text="f" break="" width=1
+}
+
 func ExampleTruncate() {
 	fmt.Println(tabwrap.Truncate("hello world", 8, "..."))
 	fmt.Println(tabwrap.Truncate("日本語テスト", 7, "..."))

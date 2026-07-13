@@ -6,7 +6,8 @@ import (
 	"github.com/clipperhouse/displaywidth"
 )
 
-// Condition configures display width behaviour.
+// Condition configures display width behaviour. Read-only operations use value
+// receivers, so callers can copy and reuse a Condition as a small option value.
 type Condition struct {
 	// TabWidth is the number of columns per tab stop. Zero or negative defaults to 4.
 	TabWidth int
@@ -22,9 +23,9 @@ type Condition struct {
 	// and ignores this option.
 	ControlSequences8Bit bool
 	// TrimTrailingSpace removes trailing spaces and tabs from each output line
-	// produced by Wrap when true. This applies after wrapping, while preserving
-	// trailing zero-width graphemes on the line (for example, ANSI control
-	// sequences when ControlSequences or ControlSequences8Bit are enabled).
+	// produced by Wrap or WrapLines when true. This applies after wrapping, while
+	// preserving trailing zero-width graphemes on the line (for example, ANSI
+	// control sequences when ControlSequences or ControlSequences8Bit are enabled).
 	TrimTrailingSpace bool
 }
 
@@ -47,14 +48,14 @@ func (c *Condition) Clone() *Condition {
 	return &clone
 }
 
-func (c *Condition) tabWidth() int {
+func (c Condition) tabWidth() int {
 	if c.TabWidth <= 0 {
 		return 4
 	}
 	return c.TabWidth
 }
 
-func (c *Condition) options() displaywidth.Options {
+func (c Condition) options() displaywidth.Options {
 	return displaywidth.Options{
 		EastAsianWidth:       c.EastAsianWidth,
 		ControlSequences:     c.ControlSequences,
@@ -76,7 +77,7 @@ type displayScanner struct {
 	maxWidth  int
 }
 
-func (c *Condition) newDisplayScanner(s string, opts displaywidth.Options) displayScanner {
+func (c Condition) newDisplayScanner(s string, opts displaywidth.Options) displayScanner {
 	return displayScanner{
 		graphemes: opts.StringGraphemes(s),
 		tabWidth:  c.tabWidth(),
@@ -121,7 +122,7 @@ func (s *displayScanner) lineWidth() int {
 	return s.maxWidth
 }
 
-func (c *Condition) stringWidth(s string, opts displaywidth.Options) int {
+func (c Condition) stringWidth(s string, opts displaywidth.Options) int {
 	scanner := c.newDisplayScanner(s, opts)
 	for {
 		if _, ok := scanner.next(); !ok {
@@ -137,13 +138,13 @@ func (c *Condition) stringWidth(s string, opts displaywidth.Options) int {
 // LF, CRLF, and CR line breaks reset the column, and for multi-line strings
 // the result is the width of the widest line. EastAsianWidth, ControlSequences, and
 // ControlSequences8Bit affect how individual graphemes are counted.
-func (c *Condition) StringWidth(s string) int {
+func (c Condition) StringWidth(s string) int {
 	return c.stringWidth(s, c.options())
 }
 
 // ExpandTab replaces every tab with spaces according to tab stops.
 // Columns reset at each line break.
-func (c *Condition) ExpandTab(s string) string {
+func (c Condition) ExpandTab(s string) string {
 	return c.expandTabFunc(s, c.options(), func(nSpaces int) string {
 		return strings.Repeat(" ", nSpaces)
 	})
@@ -157,16 +158,16 @@ func (c *Condition) ExpandTab(s string) string {
 //
 // ExpandTabFunc panics if fn is nil and s contains a tab, because fn is only
 // called when a tab is encountered.
-func (c *Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string {
+func (c Condition) ExpandTabFunc(s string, fn func(nSpaces int) string) string {
 	return c.expandTabFunc(s, c.options(), fn)
 }
 
-func (c *Condition) expandTabFunc(s string, opts displaywidth.Options, fn func(nSpaces int) string) string {
+func (c Condition) expandTabFunc(s string, opts displaywidth.Options, fn func(nSpaces int) string) string {
 	expanded, _ := c.expandTabFuncAndWidth(s, opts, fn)
 	return expanded
 }
 
-func (c *Condition) expandTabFuncAndWidth(s string, opts displaywidth.Options, fn func(nSpaces int) string) (string, int) {
+func (c Condition) expandTabFuncAndWidth(s string, opts displaywidth.Options, fn func(nSpaces int) string) (string, int) {
 	var b strings.Builder
 	b.Grow(len(s))
 
@@ -189,15 +190,238 @@ func (c *Condition) expandTabFuncAndWidth(s string, opts displaywidth.Options, f
 	return b.String(), scanner.lineWidth()
 }
 
-func (c *Condition) expandTabSpacesWithOptions(s string, opts displaywidth.Options) string {
+func (c Condition) expandTabSpacesWithOptions(s string, opts displaywidth.Options) string {
 	expanded, _ := c.expandTabSpacesWithOptionsAndWidth(s, opts)
 	return expanded
 }
 
-func (c *Condition) expandTabSpacesWithOptionsAndWidth(s string, opts displaywidth.Options) (string, int) {
+func (c Condition) expandTabSpacesWithOptionsAndWidth(s string, opts displaywidth.Options) (string, int) {
 	return c.expandTabFuncAndWidth(s, opts, func(nSpaces int) string {
 		return strings.Repeat(" ", nSpaces)
 	})
+}
+
+// CutResult describes one source-preserving display-width cut.
+type CutResult struct {
+	// Text is the render-ready fragment. Tabs are expanded from column zero.
+	Text string
+	// LineBreak is a natural LF, CRLF, or CR consumed after Text.
+	LineBreak string
+	// Rest is the exact unconsumed suffix of the input source.
+	Rest string
+	// Width is the display width of Text.
+	Width int
+	// Overflow reports that the first visible token was wider than width and was
+	// consumed whole to guarantee progress.
+	Overflow bool
+}
+
+// Cut consumes one render-ready fragment of s.
+//
+// For a positive width, Cut consumes complete grapheme clusters and tabs until
+// the next token would exceed width. If the first visible token is wider than
+// width, Cut consumes it whole and reports Overflow. A non-positive width is
+// unbounded for the first logical line.
+//
+// A terminating LF, CRLF, or CR is consumed into LineBreak. Rest is always an
+// exact suffix of s and starts after that line break, so repeated calls on a
+// non-empty input always make progress. Text is render-ready and expands tabs,
+// while source consumption is represented only by Rest. Cut does not apply
+// TrimTrailingSpace or inject SGR reset/replay sequences. It follows the same
+// control-sequence options as [Condition.Wrap], including ControlSequences8Bit.
+func (c Condition) Cut(s string, width int) CutResult {
+	opts := c.options()
+	scanner := c.newDisplayScanner(s, opts)
+
+	var b strings.Builder
+	result := CutResult{}
+	consumed := 0
+	textEnd := 0
+	hasTab := false
+	for {
+		token, ok := scanner.next()
+		if !ok {
+			break
+		}
+		if token.lineBreak {
+			result.LineBreak = token.text
+			consumed += len(token.text)
+			break
+		}
+
+		wouldOverflow := width > 0 && result.Width+token.width > width
+		if wouldOverflow && result.Width > 0 {
+			break
+		}
+		if wouldOverflow {
+			result.Overflow = true
+		}
+
+		if token.tab {
+			if !hasTab {
+				b.Grow(consumed + token.width)
+				b.WriteString(s[:consumed])
+				hasTab = true
+			}
+			writeSpaces(&b, token.width)
+		} else if hasTab {
+			b.WriteString(token.text)
+		}
+		result.Width += token.width
+		consumed += len(token.text)
+		textEnd = consumed
+	}
+
+	if hasTab {
+		result.Text = b.String()
+	} else {
+		result.Text = s[:textEnd]
+	}
+	result.Rest = s[consumed:]
+	return result
+}
+
+func writeSpaces(b *strings.Builder, count int) {
+	for range count {
+		b.WriteByte(' ')
+	}
+}
+
+// WrapLine is one render-ready line returned by [Condition.WrapLines].
+type WrapLine struct {
+	// Text is the line content without its emitted line break.
+	Text string
+	// LineBreak is the emitted break after Text. Natural LF, CRLF, and CR are
+	// preserved; inserted hard wraps use LF. It is empty on the final line.
+	LineBreak string
+	// Width is the display width of Text.
+	Width int
+	// Overflow reports that an overwide token was emitted whole on this line.
+	Overflow bool
+}
+
+// WrapLines wraps s into render-ready lines with separate first-line and
+// continuation widths.
+//
+// firstWidth applies only to the first output line. Every later output line
+// uses restWidth, after either a natural or inserted break. Non-positive lane
+// widths are unbounded. Natural LF, CRLF, and CR are preserved in LineBreak;
+// inserted hard wraps use LF.
+//
+// Tabs are expanded, TrimTrailingSpace applies to each line, and SGR state is
+// reset before each break and replayed on the next line exactly as in
+// [Condition.Wrap]. ControlSequences8Bit is honored. N emitted line breaks
+// produce N+1 results, so empty input returns one empty line and a trailing
+// natural break returns a trailing empty line.
+func (c Condition) WrapLines(s string, firstWidth int, restWidth int) []WrapLine {
+	_, lines := c.wrap(s, firstWidth, restWidth, true)
+	return lines
+}
+
+func (c Condition) wrap(s string, firstWidth int, restWidth int, collectLines bool) (string, []WrapLine) {
+	opts := c.options()
+	trackSGR := (c.ControlSequences || c.ControlSequences8Bit) && (firstWidth > 0 || restWidth > 0)
+	resetSGR := "\x1b[0m"
+	if c.ControlSequences8Bit && !c.ControlSequences {
+		resetSGR = "\x9b0m"
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+	var lineBuilder strings.Builder
+	width := firstWidth
+	col := 0
+	var lines []WrapLine
+	if collectLines {
+		lines = make([]WrapLine, 0, 1)
+	}
+
+	var sgrState sgrStyleState
+	writeString := func(text string) {
+		b.WriteString(text)
+		if collectLines {
+			lineBuilder.WriteString(text)
+		}
+	}
+	appendLine := func(lineBreak string) {
+		if !collectLines {
+			return
+		}
+		text := lineBuilder.String()
+		if c.TrimTrailingSpace {
+			text = trimTrailingLineSpace(text, opts)
+		}
+		lineWidth := c.stringWidth(text, opts)
+		lines = append(lines, WrapLine{
+			Text:      text,
+			LineBreak: lineBreak,
+			Width:     lineWidth,
+			Overflow:  width > 0 && lineWidth > width,
+		})
+		lineBuilder.Reset()
+	}
+	emitLineBreak := func(lineBreak string) {
+		if trackSGR && sgrState.active() {
+			writeString(resetSGR)
+		}
+		appendLine(lineBreak)
+		b.WriteString(lineBreak)
+		if trackSGR {
+			sgrState.writeTo(&b)
+			if collectLines {
+				sgrState.writeTo(&lineBuilder)
+			}
+		}
+		width = restWidth
+		col = 0
+	}
+
+	gs := opts.StringGraphemes(s)
+	for gs.Next() {
+		value := gs.Value()
+		tokenWidth := gs.Width()
+
+		if trackSGR && tokenWidth == 0 && len(value) > 0 && (value[0] == '\x1b' || value[0] == '\x9b') {
+			sgrState.apply(value)
+			writeString(value)
+			continue
+		}
+
+		if isLineBreak(value) {
+			emitLineBreak(value)
+			continue
+		}
+
+		if value == "\t" {
+			tokenWidth = c.tabWidth() - col%c.tabWidth()
+			if width > 0 && col+tokenWidth > width && col > 0 {
+				emitLineBreak("\n")
+				tokenWidth = c.tabWidth()
+			}
+			writeSpaces(&b, tokenWidth)
+			if collectLines {
+				writeSpaces(&lineBuilder, tokenWidth)
+			}
+			col += tokenWidth
+			continue
+		}
+
+		if width > 0 && col+tokenWidth > width && col > 0 {
+			emitLineBreak("\n")
+		}
+		writeString(value)
+		col += tokenWidth
+	}
+
+	appendLine("")
+	output := b.String()
+	if c.TrimTrailingSpace {
+		output = trimWrappedLinesRight(output, opts)
+	}
+	if !collectLines {
+		return output, nil
+	}
+	return output, lines
 }
 
 // Wrap wraps s to fit within width display columns.
@@ -216,85 +440,9 @@ func (c *Condition) expandTabSpacesWithOptionsAndWidth(s string, opts displaywid
 // sequences, a reset is emitted before each newline and the active SGR
 // sequences are replayed after it so each output line remains independently
 // styled.
-func (c *Condition) Wrap(s string, width int) string {
-	if width <= 0 {
-		result := c.ExpandTab(s)
-		if c.TrimTrailingSpace {
-			return trimWrappedLinesRight(result, c.options())
-		}
-		return result
-	}
-
-	opts := c.options()
-	tw := c.tabWidth()
-	trackSGR := c.ControlSequences || c.ControlSequences8Bit
-	resetSGR := "\x1b[0m"
-	if c.ControlSequences8Bit && !c.ControlSequences {
-		resetSGR = "\x9b0m"
-	}
-
-	var b strings.Builder
-	b.Grow(len(s))
-	col := 0
-	var sgrState sgrStyleState
-
-	// emitLineBreak writes a line break. When SGR tracking is active, it emits
-	// a reset before the line break and replays the current SGR state after it.
-	emitLineBreak := func(lineBreak string) {
-		if trackSGR && sgrState.active() {
-			b.WriteString(resetSGR)
-		}
-		b.WriteString(lineBreak)
-		if trackSGR {
-			sgrState.writeTo(&b)
-		}
-	}
-
-	gs := opts.StringGraphemes(s)
-	for gs.Next() {
-		v := gs.Value()
-		w := gs.Width()
-
-		// Track SGR sequences (zero-width escape sequences starting with ESC
-		// or, when ControlSequences8Bit is enabled, with the 8-bit CSI byte 0x9b).
-		if trackSGR && w == 0 && len(v) > 0 && (v[0] == '\x1b' || v[0] == '\x9b') {
-			sgrState.apply(v)
-			b.WriteString(v)
-			continue
-		}
-
-		if isLineBreak(v) {
-			emitLineBreak(v)
-			col = 0
-			continue
-		}
-
-		switch v {
-		case "\t":
-			spaces := tw - col%tw
-			if col+spaces > width && col > 0 {
-				emitLineBreak("\n")
-				col = 0
-				spaces = tw
-			}
-			for range spaces {
-				b.WriteByte(' ')
-			}
-			col += spaces
-		default:
-			if col+w > width && col > 0 {
-				emitLineBreak("\n")
-				col = 0
-			}
-			b.WriteString(v)
-			col += w
-		}
-	}
-	result := b.String()
-	if c.TrimTrailingSpace {
-		return trimWrappedLinesRight(result, opts)
-	}
-	return result
+func (c Condition) Wrap(s string, width int) string {
+	output, _ := c.wrap(s, width, width, false)
+	return output
 }
 
 func trimWrappedLinesRight(s string, opts displaywidth.Options) string {
@@ -683,14 +831,14 @@ type TruncateResult struct {
 // appending tail if truncation occurs. Tabs are expanded before measuring. If
 // tail itself is too wide to fit, it is truncated first so the result still
 // fits maxWidth. Tabs in tail are expanded independently before fitting, not
-// relative to the column where tail is appended. When maxWidth <= 0, tail is
-// returned as-is.
+// relative to the column where tail is appended. When maxWidth <= 0, nothing
+// fits and an empty string is returned.
 //
 // ControlSequences8Bit follows displaywidth and is ignored here, even when it
 // is enabled for StringWidth and Wrap. This can make 8-bit C1 sequences count
 // as zero-width for measurement but not for truncation; go-tabwrap keeps that
 // behavior to avoid mis-parsing UTF-8 byte sequences as standalone C1 controls.
-func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
+func (c Condition) Truncate(s string, maxWidth int, tail string) string {
 	return c.TruncateInfo(s, maxWidth, tail).Text
 }
 
@@ -698,14 +846,16 @@ func (c *Condition) Truncate(s string, maxWidth int, tail string) string {
 // resulting display width and whether truncation occurred.
 //
 // Multi-line input is truncated line by line so the reported width follows the
-// package width model: the widest output line determines Width.
-func (c *Condition) TruncateInfo(s string, maxWidth int, tail string) TruncateResult {
+// package width model: the widest output line determines Width. When maxWidth
+// is non-positive, Text is empty, Width is zero, and Truncated reports whether
+// s was non-empty.
+func (c Condition) TruncateInfo(s string, maxWidth int, tail string) TruncateResult {
+	if maxWidth <= 0 {
+		return TruncateResult{Truncated: s != ""}
+	}
+
 	opts := c.options()
 	opts.ControlSequences8Bit = false
-
-	if maxWidth <= 0 {
-		return c.truncateLineInfo(s, maxWidth, tail, opts)
-	}
 
 	if strings.Contains(tail, "\t") {
 		tail = c.expandTabSpacesWithOptions(tail, opts)
@@ -737,15 +887,7 @@ func (c *Condition) TruncateInfo(s string, maxWidth int, tail string) TruncateRe
 	return result
 }
 
-func (c *Condition) truncateLineInfo(s string, maxWidth int, tail string, opts displaywidth.Options) TruncateResult {
-	if maxWidth <= 0 {
-		return TruncateResult{
-			Text:      tail,
-			Width:     c.stringWidth(tail, opts),
-			Truncated: s != tail,
-		}
-	}
-
+func (c Condition) truncateLineInfo(s string, maxWidth int, tail string, opts displaywidth.Options) TruncateResult {
 	expanded := s
 	width := c.stringWidth(expanded, opts)
 	if strings.Contains(s, "\t") {
@@ -773,7 +915,7 @@ func (c *Condition) truncateLineInfo(s string, maxWidth int, tail string, opts d
 // rules as [Condition.StringWidth]. When left padding is needed, tabs in the
 // first line are expanded first so the added spaces do not shift later tab
 // stops there.
-func (c *Condition) FillLeft(s string, width int) string {
+func (c Condition) FillLeft(s string, width int) string {
 	opts := c.options()
 	sw := c.stringWidth(s, opts)
 	if sw >= width {
@@ -809,7 +951,7 @@ func (c *Condition) FillLeft(s string, width int) string {
 // added only at the end of the full string, so only the last line changes.
 // Width is measured using the same rules as [Condition.StringWidth].
 // If s is already at least width columns wide it is returned unchanged.
-func (c *Condition) FillRight(s string, width int) string {
+func (c Condition) FillRight(s string, width int) string {
 	w := c.StringWidth(s)
 	if w >= width {
 		return s
@@ -837,6 +979,17 @@ func ExpandTab(s string) string {
 // called when a tab is encountered.
 func ExpandTabFunc(s string, fn func(nSpaces int) string) string {
 	return defaultCondition.ExpandTabFunc(s, fn)
+}
+
+// Cut consumes one render-ready fragment using default settings.
+func Cut(s string, width int) CutResult {
+	return defaultCondition.Cut(s, width)
+}
+
+// WrapLines wraps s with separate first-line and continuation widths using
+// default settings.
+func WrapLines(s string, firstWidth int, restWidth int) []WrapLine {
+	return defaultCondition.WrapLines(s, firstWidth, restWidth)
 }
 
 // Wrap wraps s to fit within width display columns using default settings.

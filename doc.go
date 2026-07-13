@@ -34,11 +34,25 @@
 // across line breaks by resetting before the line break and replaying the active
 // SGR sequences after it.
 //
+// [Cut] consumes one render-ready fragment while preserving the exact unconsumed
+// source in [CutResult.Rest]. Tabs may make the rendered text longer than the
+// consumed source, so callers must use Rest rather than the byte length of
+// [CutResult.Text] to advance input. Natural LF, CRLF, and CR are consumed and
+// reported separately in [CutResult.LineBreak]. A positive width never splits a
+// grapheme cluster; an overwide first token is emitted whole and reported through
+// [CutResult.Overflow]. A non-positive Cut width is unbounded for one logical
+// line.
+//
+// [WrapLines] exposes the same wrapping model as structured lines, with separate
+// first-line and continuation widths. Natural line breaks are preserved while
+// inserted hard wraps use LF. [Condition.TrimTrailingSpace] applies to each
+// returned line. Non-positive wrapping lane widths are unbounded.
+//
 // [Truncate] is primarily a fitting helper. For a positive maxWidth, it expands
 // tabs, truncates the input to fit, and appends the tail when truncation occurs;
 // if the tail itself is too wide, the tail is truncated first. When maxWidth <=
-// 0, Truncate returns tail as-is. Use [TruncateInfo] when callers also need the
-// resulting display width or a truncation flag.
+// 0, nothing fits and Truncate returns an empty string. Use [TruncateInfo] when
+// callers also need the resulting display width or a truncation flag.
 //
 // Truncate intentionally ignores [Condition.ControlSequences8Bit], even when it
 // is enabled for [StringWidth] or [Wrap]. This avoids treating raw C1 bytes
@@ -46,10 +60,11 @@
 //
 // # Conditions and Concurrency
 //
-// A Condition is a small option value. Its methods do not mutate the Condition
-// and are safe to call concurrently as long as callers do not mutate the same
-// Condition concurrently. Treat shared Conditions as immutable, or use separate
-// Condition values for independent configuration.
+// A Condition is a small option value. Read-only operations use value receivers
+// and do not mutate the Condition. They are safe to call concurrently as long as
+// callers do not mutate the same source Condition while a receiver snapshot is
+// being copied. Treat shared Conditions as immutable, or use [Condition.Clone]
+// to derive independent configuration.
 //
 // [displaywidth]: https://github.com/clipperhouse/displaywidth
 package tabwrap
