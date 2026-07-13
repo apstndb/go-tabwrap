@@ -661,6 +661,24 @@ func TestWrapLinesMatchesWrap(t *testing.T) {
 	}
 }
 
+func TestWrapLinesWidthUsesRenderedText(t *testing.T) {
+	t.Parallel()
+
+	c := Condition{}
+	const input = "aa\t\ufe0f"
+	lines := c.WrapLines(input, 0, 0)
+	if len(lines) != 1 {
+		t.Fatalf("WrapLines() returned %d lines, want 1: %+v", len(lines), lines)
+	}
+	renderedWidth := c.StringWidth(lines[0].Text)
+	if sourceWidth := c.StringWidth(input); sourceWidth == renderedWidth {
+		t.Fatalf("test fixture does not distinguish source and rendered widths: both are %d", renderedWidth)
+	}
+	if got, want := lines[0].Width, renderedWidth; got != want {
+		t.Errorf("WrapLines()[0].Width = %d, rendered text width = %d; line=%+v", got, want, lines[0])
+	}
+}
+
 func TestWrapLinesSGRCarryOver(t *testing.T) {
 	t.Parallel()
 

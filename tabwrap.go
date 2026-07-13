@@ -259,6 +259,8 @@ func (c Condition) Cut(s string, width int) CutResult {
 
 		if token.tab {
 			if !hasTab {
+				// Keep the hint bounded to this cut. Growing for len(s) makes
+				// iterative bounded cuts allocate quadratically over the suffixes.
 				b.Grow(consumed + token.width)
 				b.WriteString(s[:consumed])
 				hasTab = true
@@ -327,7 +329,9 @@ func (c Condition) wrap(s string, firstWidth int, restWidth int, collectLines bo
 	}
 
 	var b strings.Builder
-	b.Grow(len(s))
+	if !collectLines {
+		b.Grow(len(s))
+	}
 	var lineBuilder strings.Builder
 	width := firstWidth
 	col := 0
@@ -338,9 +342,10 @@ func (c Condition) wrap(s string, firstWidth int, restWidth int, collectLines bo
 
 	var sgrState sgrStyleState
 	writeString := func(text string) {
-		b.WriteString(text)
 		if collectLines {
 			lineBuilder.WriteString(text)
+		} else {
+			b.WriteString(text)
 		}
 	}
 	appendLine := func(lineBreak string) {
@@ -364,12 +369,16 @@ func (c Condition) wrap(s string, firstWidth int, restWidth int, collectLines bo
 		if trackSGR && sgrState.active() {
 			writeString(resetSGR)
 		}
-		appendLine(lineBreak)
-		b.WriteString(lineBreak)
+		if collectLines {
+			appendLine(lineBreak)
+		} else {
+			b.WriteString(lineBreak)
+		}
 		if trackSGR {
-			sgrState.writeTo(&b)
 			if collectLines {
 				sgrState.writeTo(&lineBuilder)
+			} else {
+				sgrState.writeTo(&b)
 			}
 		}
 		width = restWidth
@@ -398,9 +407,10 @@ func (c Condition) wrap(s string, firstWidth int, restWidth int, collectLines bo
 				emitLineBreak("\n")
 				tokenWidth = c.tabWidth()
 			}
-			writeSpaces(&b, tokenWidth)
 			if collectLines {
 				writeSpaces(&lineBuilder, tokenWidth)
+			} else {
+				writeSpaces(&b, tokenWidth)
 			}
 			col += tokenWidth
 			continue
@@ -413,15 +423,15 @@ func (c Condition) wrap(s string, firstWidth int, restWidth int, collectLines bo
 		col += tokenWidth
 	}
 
-	appendLine("")
+	if collectLines {
+		appendLine("")
+		return "", lines
+	}
 	output := b.String()
 	if c.TrimTrailingSpace {
 		output = trimWrappedLinesRight(output, opts)
 	}
-	if !collectLines {
-		return output, nil
-	}
-	return output, lines
+	return output, nil
 }
 
 // Wrap wraps s to fit within width display columns.
